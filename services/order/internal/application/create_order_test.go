@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/example/marketplace-order-system/services/order/internal/adapters/memory"
-	"github.com/example/marketplace-order-system/services/order/internal/application"
-	"github.com/example/marketplace-order-system/services/order/internal/domain"
-	"github.com/example/marketplace-order-system/services/order/internal/ports"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/adapters/memory"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/application"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/domain"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/ports"
 )
 
 func TestCreateOrderSuccess(t *testing.T) {

@@ -5,6 +5,13 @@ A production-oriented Go backend learning project for marketplace order processi
 The project is intentionally developed in milestones. Each reliability mechanism is
 introduced only after reproducing the failure that motivates it.
 
+## Milestones
+
+- [M1 — Order domain model](docs/milestones/M1-domain-model.md)
+- [M2 — Create Order application flow](docs/milestones/M2-create-order.md)
+- [M3 — MongoDB Order repository](docs/milestones/M3-mongodb-repository.md)
+- [M4 — Runnable Order HTTP API](docs/milestones/M4-runnable-order-api.md)
+
 ## Current milestone: M4 — Runnable Order HTTP API
 
 Implemented:

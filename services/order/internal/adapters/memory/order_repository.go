@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/example/marketplace-order-system/services/order/internal/domain"
-	"github.com/example/marketplace-order-system/services/order/internal/ports"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/domain"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/ports"
 )
 
 type idempotencyIdentity struct {

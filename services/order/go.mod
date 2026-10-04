@@ -1,4 +1,4 @@
-module github.com/example/marketplace-order-system/services/order
+module github.com/kitphon/marketplace-order-system/services/order
 
 go 1.25.0
 

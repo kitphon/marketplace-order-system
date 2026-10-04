@@ -3,7 +3,7 @@ package ports
 import (
 	"context"
 
-	"github.com/example/marketplace-order-system/services/order/internal/domain"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/domain"
 )
 
 type OrderRepository interface {

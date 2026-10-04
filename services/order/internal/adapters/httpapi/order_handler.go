@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/example/marketplace-order-system/services/order/internal/application"
-	"github.com/example/marketplace-order-system/services/order/internal/domain"
-	"github.com/example/marketplace-order-system/services/order/internal/ports"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/application"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/domain"
+	"github.com/kitphon/marketplace-order-system/services/order/internal/ports"
 )
 
 const maxCreateOrderBodyBytes = 1 << 20

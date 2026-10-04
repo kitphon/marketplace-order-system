@@ -41,4 +41,3 @@ func AddMoney(left, right Money) (Money, error) {
 	}
 	return left + right, nil
 }
-

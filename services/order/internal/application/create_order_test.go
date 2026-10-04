@@ -155,7 +155,7 @@ func newHarness() harness {
 	ids := &sequenceIDGenerator{}
 
 	return harness{
-		useCase: application.NewCreateOrder(repository, products, inventory, ids, clock),
+		useCase:   application.NewCreateOrder(repository, products, inventory, ids, clock),
 		inventory: inventory,
 	}
 }

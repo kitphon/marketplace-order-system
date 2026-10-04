@@ -21,4 +21,3 @@ type OrderRepository interface {
 		expectedVersion int64,
 	) error
 }
-

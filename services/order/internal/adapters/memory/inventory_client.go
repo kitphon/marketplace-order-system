@@ -70,4 +70,3 @@ func cloneReservation(request ports.ReserveInventoryRequest) ports.ReserveInvent
 	clone.Items = append([]ports.ReservationItem(nil), request.Items...)
 	return clone
 }
-

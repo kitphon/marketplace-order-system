@@ -135,4 +135,3 @@ func (repository *OrderRepository) classifyDuplicateKey(
 		return fmt.Errorf("classify duplicate key after insert order %s: %v: %w", order.ID(), duplicateErr, err)
 	}
 }
-

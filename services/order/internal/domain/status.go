@@ -9,4 +9,3 @@ const (
 	OrderStatusConfirmed         OrderStatus = "CONFIRMED"
 	OrderStatusCancelled         OrderStatus = "CANCELLED"
 )
-

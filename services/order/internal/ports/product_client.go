@@ -17,4 +17,3 @@ type ProductSnapshot struct {
 type ProductClient interface {
 	GetByIDs(ctx context.Context, productIDs []string) ([]ProductSnapshot, error)
 }
-

@@ -46,9 +46,9 @@ func TestOrderHappyPath(t *testing.T) {
 	order := mustOrder(t, now)
 
 	steps := []struct {
-		name       string
-		transition func(time.Time) error
-		wantStatus OrderStatus
+		name        string
+		transition  func(time.Time) error
+		wantStatus  OrderStatus
 		wantVersion int64
 	}{
 		{"reserve inventory", order.MarkInventoryReserved, OrderStatusInventoryReserved, 2},
@@ -184,4 +184,3 @@ func mustTransition(t *testing.T, transition func(time.Time) error, at time.Time
 		t.Fatalf("transition error = %v", err)
 	}
 }
-

@@ -27,11 +27,11 @@ func TestOrderRepositoryIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mongo.Connect() error = %v", err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if err := client.Disconnect(context.Background()); err != nil {
 			t.Errorf("Disconnect() error = %v", err)
 		}
-	}()
+	})
 	if err := client.Ping(ctx, nil); err != nil {
 		t.Fatalf("Ping() error = %v", err)
 	}
@@ -116,4 +116,3 @@ func integrationOrder(t *testing.T, id string) *domain.Order {
 	}
 	return order
 }
-

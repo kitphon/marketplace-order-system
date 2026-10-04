@@ -9,4 +9,3 @@ var (
 	ErrProductInactive           = errors.New("product is inactive")
 	ErrUnexpectedProduct         = errors.New("product service returned an unexpected product")
 )
-

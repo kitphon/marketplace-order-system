@@ -51,6 +51,7 @@ Run the MongoDB integration tests:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d
+cd services/order
 MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
   go test -tags=integration ./internal/adapters/mongodb/...
 ```
@@ -58,6 +59,7 @@ MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
 Run the API:
 
 ```bash
+cd services/order
 MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
   go run ./cmd/api
 ```

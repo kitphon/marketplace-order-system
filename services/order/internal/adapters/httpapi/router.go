@@ -25,4 +25,3 @@ func NewRouter(orderHandler *OrderHandler, readiness ReadinessCheck) http.Handle
 	})
 	return router
 }
-

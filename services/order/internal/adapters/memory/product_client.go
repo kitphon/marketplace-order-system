@@ -38,4 +38,3 @@ func (client *ProductClient) GetByIDs(
 	}
 	return result, nil
 }
-

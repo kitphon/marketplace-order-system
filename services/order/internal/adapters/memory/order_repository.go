@@ -81,4 +81,3 @@ func (r *OrderRepository) Update(
 	r.byID[order.ID()] = order.Clone()
 	return nil
 }
-

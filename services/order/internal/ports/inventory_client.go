@@ -19,4 +19,3 @@ type ReserveInventoryRequest struct {
 type InventoryClient interface {
 	Reserve(ctx context.Context, request ReserveInventoryRequest) error
 }
-

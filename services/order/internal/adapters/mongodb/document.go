@@ -103,4 +103,3 @@ func (document orderDocument) toOrder() (*domain.Order, error) {
 		UpdatedAt:      document.UpdatedAt,
 	})
 }
-

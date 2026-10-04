@@ -1,0 +1,9 @@
+# Binaries and test artifacts
+bin/
+coverage.out
+*.test
+
+# Local environment
+.env
+.DS_Store
+

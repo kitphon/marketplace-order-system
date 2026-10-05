@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package marketplace.inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/kitphon/marketplace-order-system/contracts/inventory/v1;inventoryv1";
+
+// InventoryService manages stock reservations for marketplace orders.
+service InventoryService {
+  // ReserveInventory idempotently reserves the requested stock for an order.
+  rpc ReserveInventory(ReserveInventoryRequest) returns (ReserveInventoryResponse);
+}
+
+// ReservationStatus describes the outcome represented by a reservation response.
+enum ReservationStatus {
+  // RESERVATION_STATUS_UNSPECIFIED represents an absent or unknown status.
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  // RESERVATION_STATUS_RESERVED means the requested stock is reserved.
+  RESERVATION_STATUS_RESERVED = 1;
+}
+
+// InventoryFailureReason is a machine-readable reason for an Inventory RPC failure.
+enum InventoryFailureReason {
+  // INVENTORY_FAILURE_REASON_UNSPECIFIED represents an absent or unknown reason.
+  INVENTORY_FAILURE_REASON_UNSPECIFIED = 0;
+  // INVENTORY_FAILURE_REASON_INSUFFICIENT_STOCK means available stock was too low.
+  INVENTORY_FAILURE_REASON_INSUFFICIENT_STOCK = 1;
+  // INVENTORY_FAILURE_REASON_RESERVATION_CONFLICT means order_id identifies a different reservation request.
+  INVENTORY_FAILURE_REASON_RESERVATION_CONFLICT = 2;
+  // INVENTORY_FAILURE_REASON_RESERVATION_EXPIRED means the reservation is no longer valid.
+  INVENTORY_FAILURE_REASON_RESERVATION_EXPIRED = 3;
+}
+
+// ReserveInventoryRequest describes the stock to reserve for one order.
+message ReserveInventoryRequest {
+  // order_id is the idempotency identity for the reservation operation.
+  string order_id = 1;
+  repeated ReservationItem items = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// ReservationItem is a product and quantity requested for reservation.
+message ReservationItem {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+// ReserveInventoryResponse describes a successful stock reservation.
+message ReserveInventoryResponse {
+  string reservation_id = 1;
+  ReservationStatus status = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+// InventoryErrorDetail carries structured business context for rich gRPC status errors.
+message InventoryErrorDetail {
+  InventoryFailureReason reason = 1;
+  // product_id identifies the relevant product when the failure is product-specific.
+  optional string product_id = 2;
+}

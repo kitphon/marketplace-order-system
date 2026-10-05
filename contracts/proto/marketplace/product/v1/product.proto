@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package marketplace.product.v1;
+
+option go_package = "github.com/kitphon/marketplace-order-system/contracts/product/v1;productv1";
+
+// ProductService provides product snapshots for marketplace workflows.
+service ProductService {
+  // GetProducts returns the products matching the requested identifiers.
+  rpc GetProducts(GetProductsRequest) returns (GetProductsResponse);
+}
+
+// GetProductsRequest identifies the products to retrieve.
+message GetProductsRequest {
+  // product_ids contains the stable product identifiers requested by the caller.
+  repeated string product_ids = 1;
+}
+
+// GetProductsResponse contains the product snapshots that were found.
+message GetProductsResponse {
+  repeated Product products = 1;
+}
+
+// Product is an immutable product snapshot suitable for order pricing.
+message Product {
+  string product_id = 1;
+  string seller_id = 2;
+  string name = 3;
+  // unit_price_minor stores money in the currency's minor unit, never as floating point.
+  int64 unit_price_minor = 4;
+  string currency = 5;
+  bool active = 6;
+}

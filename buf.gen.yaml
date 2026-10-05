@@ -1,0 +1,14 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.11
+    out: contracts
+    opt:
+      - paths=import
+      - module=github.com/kitphon/marketplace-order-system/contracts
+  - remote: buf.build/grpc/go:v1.5.1
+    out: contracts
+    opt:
+      - paths=import
+      - module=github.com/kitphon/marketplace-order-system/contracts
+inputs:
+  - directory: contracts/proto

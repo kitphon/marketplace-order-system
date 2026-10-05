@@ -11,8 +11,12 @@ introduced only after reproducing the failure that motivates it.
 - [M2 — Create Order application flow](docs/milestones/M2-create-order.md)
 - [M3 — MongoDB Order repository](docs/milestones/M3-mongodb-repository.md)
 - [M4 — Runnable Order HTTP API](docs/milestones/M4-runnable-order-api.md)
+- [M5A — Versioned Product and Inventory gRPC contracts](docs/milestones/M5A-grpc-contracts.md)
 
-## Current milestone: M4 — Runnable Order HTTP API
+## Current runnable milestone: M4 — Runnable Order HTTP API
+
+M5A adds versioned gRPC contracts and generated Go packages only. The running
+Order Service continues to use the M4 in-memory Product and Inventory adapters.
 
 Implemented:
 

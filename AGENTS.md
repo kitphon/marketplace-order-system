@@ -3,7 +3,7 @@
 - Preserve Clean Architecture boundaries.
 - Domain and application packages must not import HTTP, MongoDB, Kafka, Redis, or gRPC implementations.
 - Infrastructure adapters must implement interfaces declared in `internal/ports`.
-- Internal Go imports must use the canonical `github.com/kitphon/marketplace-order-system/services/order` module path.
+- Internal Go imports must use the canonical repository module paths under `github.com/kitphon/marketplace-order-system`; never reintroduce placeholder module paths.
 - Represent currency in minor units using `int64`; do not use floating point for money.
 - Preserve request idempotency and optimistic concurrency behavior.
 - Add or update tests for every behavior change.

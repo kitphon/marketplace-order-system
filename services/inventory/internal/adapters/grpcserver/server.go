@@ -70,6 +70,8 @@ func reserveCommand(request *inventoryv1.ReserveInventoryRequest) (application.R
 
 func mapError(err error) error {
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return status.FromContextError(err).Err()
 	case errors.Is(err, application.ErrInvalidReserveInventoryRequest):
 		return status.Error(codes.InvalidArgument, "inventory reservation request is invalid")
 	case errors.Is(err, ports.ErrInsufficientStock):

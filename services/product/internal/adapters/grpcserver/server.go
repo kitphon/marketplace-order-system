@@ -30,10 +30,14 @@ func (server *Server) GetProducts(
 	}
 	products, err := server.getProducts.Execute(ctx, productIDs)
 	if err != nil {
-		if errors.Is(err, application.ErrInvalidGetProductsRequest) {
+		switch {
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return nil, status.FromContextError(err).Err()
+		case errors.Is(err, application.ErrInvalidGetProductsRequest):
 			return nil, status.Error(codes.InvalidArgument, "product_ids must be non-empty and unique")
+		default:
+			return nil, status.Error(codes.Internal, "get products failed")
 		}
-		return nil, status.Error(codes.Internal, "get products failed")
 	}
 
 	response := &productv1.GetProductsResponse{Products: make([]*productv1.Product, 0, len(products))}

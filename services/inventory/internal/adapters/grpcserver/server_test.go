@@ -123,7 +123,11 @@ func TestReserveInventoryExpiredDetail(t *testing.T) {
 
 func TestReserveInventoryUnknownErrorHasNoBusinessDetail(t *testing.T) {
 	clock := &testClock{now: time.Date(2026, time.October, 6, 9, 0, 0, 0, time.UTC)}
-	server := grpcserver.New(application.NewReserveInventory(failingRepository{}, clock, &sequenceIDs{}))
+	server := grpcserver.New(application.NewReserveInventory(
+		failingRepository{err: errors.New("storage unavailable")},
+		clock,
+		&sequenceIDs{},
+	))
 	_, err := server.ReserveInventory(context.Background(), request(
 		"order-001",
 		clock.Now().Add(time.Hour),
@@ -135,6 +139,39 @@ func TestReserveInventoryUnknownErrorHasNoBusinessDetail(t *testing.T) {
 	}
 	if details := gotStatus.Details(); len(details) != 0 {
 		t.Fatalf("details = %v, want none", details)
+	}
+}
+
+func TestReserveInventoryMapsRepositoryContextErrorsWithoutBusinessDetail(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode codes.Code
+	}{
+		{name: "canceled", err: fmt.Errorf("repository transaction: %w", context.Canceled), wantCode: codes.Canceled},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, wantCode: codes.DeadlineExceeded},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clock := &testClock{now: time.Date(2026, time.October, 6, 9, 0, 0, 0, time.UTC)}
+			server := grpcserver.New(application.NewReserveInventory(
+				failingRepository{err: test.err},
+				clock,
+				&sequenceIDs{},
+			))
+			_, err := server.ReserveInventory(context.Background(), request(
+				"order-001",
+				clock.Now().Add(time.Hour),
+				&inventoryv1.ReservationItem{ProductId: "product-001", Quantity: 1},
+			))
+			gotStatus := status.Convert(err)
+			if gotStatus.Code() != test.wantCode {
+				t.Fatalf("status = %v, want %v; error=%v", gotStatus.Code(), test.wantCode, err)
+			}
+			if details := gotStatus.Details(); len(details) != 0 {
+				t.Fatalf("details = %v, want none", details)
+			}
+		})
 	}
 }
 
@@ -241,12 +278,12 @@ func (ids *sequenceIDs) NewID() (string, error) {
 	return fmt.Sprintf("reservation-%03d", ids.next.Add(1)), nil
 }
 
-type failingRepository struct{}
+type failingRepository struct{ err error }
 
-func (failingRepository) Reserve(context.Context, ports.ReserveRequest) (*domain.Reservation, error) {
-	return nil, errors.New("storage unavailable")
+func (repository failingRepository) Reserve(context.Context, ports.ReserveRequest) (*domain.Reservation, error) {
+	return nil, repository.err
 }
 
-func (failingRepository) ExpireReservations(context.Context, time.Time) (int, error) {
-	return 0, errors.New("storage unavailable")
+func (repository failingRepository) ExpireReservations(context.Context, time.Time) (int, error) {
+	return 0, repository.err
 }

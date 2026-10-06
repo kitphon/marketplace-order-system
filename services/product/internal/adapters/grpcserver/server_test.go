@@ -2,6 +2,7 @@ package grpcserver_test
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/kitphon/marketplace-order-system/services/product/internal/adapters/memory"
 	"github.com/kitphon/marketplace-order-system/services/product/internal/application"
 	"github.com/kitphon/marketplace-order-system/services/product/internal/domain"
+	"github.com/kitphon/marketplace-order-system/services/product/internal/ports"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -47,6 +49,28 @@ func TestGetProductsInvalidRequestStatus(t *testing.T) {
 	}
 }
 
+func TestGetProductsMapsRepositoryContextErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode codes.Code
+	}{
+		{name: "canceled", err: fmt.Errorf("repository query: %w", context.Canceled), wantCode: codes.Canceled},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, wantCode: codes.DeadlineExceeded},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := grpcserver.New(application.NewGetProducts(failingRepository{err: test.err}))
+			_, err := server.GetProducts(context.Background(), &productv1.GetProductsRequest{
+				ProductIds: []string{"product-001"},
+			})
+			if status.Code(err) != test.wantCode {
+				t.Fatalf("status = %v, want %v; error=%v", status.Code(err), test.wantCode, err)
+			}
+		})
+	}
+}
+
 func newClient(t *testing.T, products []domain.Product) productv1.ProductServiceClient {
 	t.Helper()
 	listener := bufconn.Listen(1 << 20)
@@ -70,3 +94,11 @@ func newClient(t *testing.T, products []domain.Product) productv1.ProductService
 	t.Cleanup(func() { _ = connection.Close() })
 	return productv1.NewProductServiceClient(connection)
 }
+
+type failingRepository struct{ err error }
+
+func (repository failingRepository) GetByIDs(context.Context, []string) ([]domain.Product, error) {
+	return nil, repository.err
+}
+
+var _ ports.ProductRepository = failingRepository{}

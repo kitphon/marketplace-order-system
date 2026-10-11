@@ -1,7 +1,7 @@
 BUF_VERSION := v1.72.0
 BUF := env GOWORK=off go run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 
-.PHONY: proto proto-format proto-lint proto-generate vet test test-race verify
+.PHONY: proto proto-format proto-lint proto-generate vet test test-race verify integration smoke verify-all
 
 proto: proto-format proto-lint proto-generate
 
@@ -36,3 +36,13 @@ verify:
 	$(MAKE) vet
 	$(MAKE) test
 	$(MAKE) test-race
+
+integration:
+	./scripts/test-stack.sh integration
+
+smoke:
+	./scripts/test-stack.sh smoke
+
+verify-all:
+	$(MAKE) verify
+	./scripts/test-stack.sh all

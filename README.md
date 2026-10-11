@@ -51,6 +51,7 @@ Implemented:
 - Bounded, context-aware retries owned by the outbound adapters
 - Product currency propagation and consistent-currency validation
 - Long-lived Product and Inventory gRPC connections in the Order runtime
+- Reproducible real-process M5 integration and smoke tests
 
 Not implemented yet:
 
@@ -60,9 +61,30 @@ Not implemented yet:
 
 ## Run tests
 
+The fast repository checks do not require Docker:
+
 ```bash
 make verify
 ```
+
+Full-stack checks require Go, Docker Compose v2, and a running Docker daemon:
+
+```bash
+make integration  # comprehensive black-box scenarios
+make smoke        # minimal full-stack happy path
+make verify-all   # fast checks, then both full-stack groups in one stack lifecycle
+```
+
+The full-stack runner builds and starts the real Product, Inventory, and Order
+binaries over TCP and provisions an isolated MongoDB 8.0 replica set. Every run
+uses a unique Compose project, volume, and database, then removes only those
+resources. On failure it prints separate service logs before cleanup.
+
+Test addresses default to Product `127.0.0.1:55051`, Inventory
+`127.0.0.1:55052`, Order `127.0.0.1:58080`, and MongoDB port `57017`. Override
+them with `M5_TEST_PRODUCT_ADDR`, `M5_TEST_INVENTORY_ADDR`,
+`M5_TEST_ORDER_ADDR`, and `M5_TEST_MONGODB_PORT`; set the overall bound with
+`M5_TEST_TIMEOUT_SECONDS`. Occupied ports fail early with a clear error.
 
 Run the MongoDB integration tests:
 

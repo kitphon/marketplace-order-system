@@ -108,6 +108,54 @@ MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
   go -C services/order run ./cmd/api
 ```
 
+## Automated verification
+
+M5C's previously manual smoke verification is now reproducible with one-command
+test levels:
+
+```bash
+make verify       # vet, unit tests, and race tests; Docker is not required
+make integration  # comprehensive full-stack black-box scenarios
+make smoke        # minimal full-stack health and happy-path check
+make verify-all   # verify, then integration and smoke in one stack lifecycle
+```
+
+The integration and smoke commands require Go, Docker Compose v2, and a running
+Docker daemon. The runner starts this topology using actual service binaries and
+real TCP connections:
+
+```text
+black-box Go tests -> Product gRPC :55051
+                   -> Inventory gRPC :55052
+                   -> Order HTTP :58080 -> Product and Inventory gRPC
+                                        -> isolated MongoDB replica set :57017
+```
+
+Integration tests cover named gRPC health, Product response mapping, Inventory
+reservation idempotency and structured conflict details, the full Create Order
+path, HTTP idempotency and conflict behavior, missing products, and insufficient
+stock. Smoke waits for both named gRPC health services plus Order liveness and
+readiness, creates one order, and verifies its idempotent retry.
+
+Each invocation builds Product, Inventory, and Order, gives MongoDB a unique
+Compose project, volume, and database, and cleans up only those resources on
+success, failure, interruption, or timeout. Readiness uses bounded polling. A
+failed assertion prints separate Product, Inventory, Order, and MongoDB logs
+before cleanup. Neither suite needs `grpcurl`, `jq`, or `grpc-health-probe`.
+
+The default test endpoints can be changed when ports are occupied:
+
+| Variable | Default |
+| --- | --- |
+| `M5_TEST_PRODUCT_ADDR` | `127.0.0.1:55051` |
+| `M5_TEST_INVENTORY_ADDR` | `127.0.0.1:55052` |
+| `M5_TEST_ORDER_ADDR` | `127.0.0.1:58080` |
+| `M5_TEST_MONGODB_PORT` | `57017` |
+| `M5_TEST_TIMEOUT_SECONDS` | `180` |
+
+`make verify-all` deliberately starts the full stack once and selects both Go
+test groups in that lifecycle, avoiding duplicate integration setup.
+
 ## Remaining reliability gap
 
 Bounded transport retries do not resolve every ambiguous Inventory outcome.

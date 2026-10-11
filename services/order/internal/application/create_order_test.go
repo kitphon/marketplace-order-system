@@ -28,8 +28,53 @@ func TestCreateOrderSuccess(t *testing.T) {
 	if got, want := order.TotalAmount().MinorUnits(), int64(400_000); got != want {
 		t.Fatalf("TotalAmount() = %d, want %d", got, want)
 	}
+	if got, want := order.Currency(), domain.CurrencyTHB; got != want {
+		t.Fatalf("Currency() = %q, want %q", got, want)
+	}
 	if got, want := harness.inventory.calls.Load(), int64(1); got != want {
 		t.Fatalf("Reserve() calls = %d, want %d", got, want)
+	}
+}
+
+func TestUnsupportedProductCurrencyIsRejectedByDomain(t *testing.T) {
+	harness := newHarness()
+	product := harness.products["product-001"]
+	product.Currency = "USD"
+	harness.products["product-001"] = product
+
+	_, err := harness.useCase.Execute(context.Background(), defaultCommand())
+	if !errors.Is(err, domain.ErrUnsupportedCurrency) {
+		t.Fatalf("Execute() error = %v, want ErrUnsupportedCurrency", err)
+	}
+}
+
+func TestMixedProductCurrenciesAreRejected(t *testing.T) {
+	harness := newHarness()
+	harness.products["product-002"] = ports.ProductSnapshot{
+		ProductID: "product-002",
+		SellerID:  "seller-001",
+		Name:      "Mouse",
+		UnitPrice: domain.Money(90_000),
+		Currency:  "USD",
+		Active:    true,
+	}
+	command := defaultCommand()
+	command.Items = append(command.Items, application.CreateOrderItem{ProductID: "product-002", Quantity: 1})
+
+	_, err := harness.useCase.Execute(context.Background(), command)
+	if !errors.Is(err, application.ErrMixedProductCurrencies) {
+		t.Fatalf("Execute() error = %v, want ErrMixedProductCurrencies", err)
+	}
+}
+
+func TestPartialProductResponseReturnsProductNotFound(t *testing.T) {
+	harness := newHarness()
+	command := defaultCommand()
+	command.Items = append(command.Items, application.CreateOrderItem{ProductID: "missing", Quantity: 1})
+
+	_, err := harness.useCase.Execute(context.Background(), command)
+	if !errors.Is(err, application.ErrProductNotFound) {
+		t.Fatalf("Execute() error = %v, want ErrProductNotFound", err)
 	}
 }
 
@@ -135,6 +180,7 @@ func TestConcurrentDuplicateRequestsCreateOneOrder(t *testing.T) {
 type harness struct {
 	useCase   *application.CreateOrder
 	inventory *fakeInventoryClient
+	products  map[string]ports.ProductSnapshot
 }
 
 func newHarness() harness {
@@ -147,6 +193,7 @@ func newHarness() harness {
 				SellerID:  "seller-001",
 				Name:      "Mechanical Keyboard",
 				UnitPrice: domain.Money(200_000),
+				Currency:  domain.CurrencyTHB,
 				Active:    true,
 			},
 		},
@@ -157,6 +204,7 @@ func newHarness() harness {
 	return harness{
 		useCase:   application.NewCreateOrder(repository, products, inventory, ids, clock),
 		inventory: inventory,
+		products:  products.products,
 	}
 }
 

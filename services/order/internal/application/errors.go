@@ -8,4 +8,5 @@ var (
 	ErrProductNotFound           = errors.New("product not found")
 	ErrProductInactive           = errors.New("product is inactive")
 	ErrUnexpectedProduct         = errors.New("product service returned an unexpected product")
+	ErrMixedProductCurrencies    = errors.New("products use different currencies")
 )

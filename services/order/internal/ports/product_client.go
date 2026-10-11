@@ -11,6 +11,7 @@ type ProductSnapshot struct {
 	SellerID  string
 	Name      string
 	UnitPrice domain.Money
+	Currency  string
 	Active    bool
 }
 

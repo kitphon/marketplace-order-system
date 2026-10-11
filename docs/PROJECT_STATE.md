@@ -1,6 +1,6 @@
 # Project state
 
-Last verified: 2026-10-06
+Last verified: 2026-10-11
 
 ## Goal
 
@@ -14,6 +14,7 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - **M4 — Runnable Order API:** Composition root, MongoDB persistence, in-memory Product and Inventory adapters, `POST /v1/orders`, health endpoints, and graceful shutdown.
 - **M5A — gRPC contracts:** Versioned Product and Inventory Protobuf APIs, structured Inventory failure details, generated Go packages, and reproducible Buf generation.
 - **M5B — gRPC services:** Independently runnable Product and Inventory gRPC processes, Clean Architecture service layers, in-memory repositories, atomic idempotent Inventory reservations, expiration, structured errors, health services, and graceful shutdown.
+- **M5C — Order gRPC integration:** Order-side Product and Inventory adapters, structured error mapping, bounded context-aware retries, currency propagation, and long-lived runtime connections. M5 service boundaries are complete.
 
 ## Current architecture
 
@@ -21,10 +22,11 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - Clean Architecture / Ports and Adapters: domain and application policy are isolated from delivery and persistence implementations.
 - HTTP endpoints: `POST /v1/orders`, `GET /health/live`, and MongoDB-backed `GET /health/ready`.
 - MongoDB Go Driver v2 persists Order aggregates as embedded documents.
-- The M4 Order runtime still uses in-process Product and Inventory adapters; its application behavior is unchanged by M5B.
+- The Order runtime uses outbound Product and Inventory gRPC adapters; memory clients remain available only for focused tests.
 - Standalone Product and Inventory processes implement the M5A gRPC contracts on `:50051` and `:50052` by default.
 - Each new service follows gRPC adapter → application use case → repository port → in-memory repository adapter.
 - The Order, Product, and Inventory command packages are independent composition roots that own their concrete dependency wiring.
+- The Order composition root owns two long-lived gRPC connections and closes them during shutdown. Product and Inventory do not participate in Order health endpoints.
 
 ## Decisions and invariants
 
@@ -40,24 +42,27 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - Inventory compares a canonical, order-independent item payload. An identical retry preserves the original reservation ID and expiry and never decrements stock twice.
 - Inventory reservation creation, expiration, and stock restoration are serialized by one in-process mutex. Expired records remain as idempotency tombstones, and stock is restored exactly once.
 - The in-memory Inventory repository is safe only within one process. Multiple production replicas require shared durable storage with transactional or conditional updates; a Distributed Lock is not the correctness mechanism.
+- Product currency crosses the gRPC and port boundaries. Create Order requires one consistent currency, while the domain remains authoritative for the currently supported THB currency.
+- Order-side adapters exclusively own bounded retries for `Unavailable` and per-attempt `DeadlineExceeded`; no gRPC service-config retry policy is configured.
+- Parent cancellation and deadlines stop retries immediately and cross the adapter boundary unchanged.
 
 ## Known reliability gap
 
-Create Order persists `PENDING` before reserving Inventory. If Inventory reserves stock but its result is ambiguous, or Order Service cannot persist `INVENTORY_RESERVED`, the order can remain `PENDING`. M4 intentionally has no automatic retry or reconciliation; those mechanisms belong to a later reliability milestone.
+Create Order persists `PENDING` before reserving Inventory. If Inventory reserves stock but its result is ambiguous, or Order Service cannot persist `INVENTORY_RESERVED`, the order can remain `PENDING`. M5C adds bounded transport retries using Inventory's `order_id` idempotency identity, but it intentionally does not add stale-`PENDING` reconciliation.
 
 ## Explicitly deferred
 
-- Order-side Product and Inventory gRPC adapters, deadlines, status handling, and runtime wiring
 - Durable Product and Inventory storage and multi-replica coordination
 - Kafka domain events
 - Transactional outbox and consumer inbox patterns
 - Redis-based concurrency controls
-- Automated retry and stale-`PENDING` reconciliation
+- Stale-`PENDING` reconciliation beyond bounded adapter retries
+- Production gRPC TLS or mTLS
 - Production observability and load testing
 
 ## Next milestone
 
-**M5C — Order-side gRPC integration.** Add Product and Inventory client adapters, deadlines, status handling, and runtime wiring without changing the Create Order policy. M5 as a whole is not yet complete.
+M5 is complete. The next reliability work should address ambiguous Inventory outcomes and stale-`PENDING` reconciliation before introducing asynchronous messaging.
 
 ## Last verification
 
@@ -87,3 +92,12 @@ M5B service verification on 2026-10-06 with Go 1.27.1 against `go 1.25.0` direct
 - `go vet ./...`, `go test ./...`, and `go test -race ./...` — passed from all four workspace modules.
 - Product and Inventory processes started locally; `grpc-health-probe v0.4.38` reported `SERVING` for both named services.
 - `git diff --check` — passed.
+
+M5C integration verification on 2026-10-11 with Go 1.27.1 against `go 1.25.0` directives:
+
+- `gofmt -w` — completed for all Order Go files.
+- `go -C services/order mod tidy` and `go work sync` — passed.
+- `make proto-lint` and `make proto-generate` — passed; protobuf sources and generated outputs remained unchanged.
+- `make verify` — passed repository-wide vet, unit, and race tests in all four Go modules.
+- `git diff --check` — passed.
+- A local MongoDB-backed smoke test started Product, Inventory, and Order, observed `UP` and `READY`, and created an `INVENTORY_RESERVED` THB order through the real gRPC adapters.

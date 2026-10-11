@@ -65,6 +65,7 @@ func testRouter() http.Handler {
 			SellerID:  "seller-001",
 			Name:      "Mechanical Keyboard",
 			UnitPrice: domain.Money(200_000),
+			Currency:  domain.CurrencyTHB,
 			Active:    true,
 		},
 	})

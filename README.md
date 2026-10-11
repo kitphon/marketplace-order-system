@@ -13,12 +13,12 @@ introduced only after reproducing the failure that motivates it.
 - [M4 — Runnable Order HTTP API](docs/milestones/M4-runnable-order-api.md)
 - [M5A — Versioned Product and Inventory gRPC contracts](docs/milestones/M5A-grpc-contracts.md)
 - [M5B — Runnable Product and Inventory gRPC services](docs/milestones/M5B-grpc-services.md)
+- [M5C — Order-side gRPC integration](docs/milestones/M5C-order-grpc-integration.md)
 
-## Current runnable milestones
+## Current runnable milestone: M5 — gRPC service boundaries
 
-The Order Service remains at M4 and continues to use its in-process Product and
-Inventory adapters. M5B adds independently runnable Product and Inventory gRPC
-services, but the Order Service will not call them until M5C.
+The Order Service now calls the standalone Product and Inventory services
+through versioned gRPC adapters. MongoDB remains the Order persistence layer.
 
 Implemented:
 
@@ -47,10 +47,13 @@ Implemented:
 - Standalone Product and Inventory gRPC processes with in-memory repositories
 - Inventory reservation idempotency, atomic stock changes, and expiration
 - Standard gRPC health services and graceful gRPC shutdown
+- Order-side Product and Inventory gRPC adapters with structured error mapping
+- Bounded, context-aware retries owned by the outbound adapters
+- Product currency propagation and consistent-currency validation
+- Long-lived Product and Inventory gRPC connections in the Order runtime
 
 Not implemented yet:
 
-- Order-side Product and Inventory gRPC clients and runtime wiring
 - Kafka, transactional outbox, and inbox
 - Redis concurrency controls
 - Observability and load testing
@@ -58,9 +61,7 @@ Not implemented yet:
 ## Run tests
 
 ```bash
-for module in contracts services/order services/product services/inventory; do
-  (cd "$module" && go test ./... && go test -race ./...)
-done
+make verify
 ```
 
 Run the MongoDB integration tests:
@@ -72,30 +73,27 @@ MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
   go test -tags=integration ./internal/adapters/mongodb/...
 ```
 
-Run the API:
+Run the Product and Inventory services in separate terminals:
 
 ```bash
-cd services/order
+go -C services/product run ./cmd/grpc
+```
+
+```bash
+go -C services/inventory run ./cmd/grpc
+```
+
+Then run the Order API:
+
+```bash
 MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
-  go run ./cmd/api
+  go -C services/order run ./cmd/api
 ```
 
-Run the standalone Product and Inventory services in separate terminals:
-
-```bash
-cd services/product
-go run ./cmd/grpc
-```
-
-```bash
-cd services/inventory
-go run ./cmd/grpc
-```
-
-Product listens on `:50051` by default. Inventory listens on `:50052` and
-checks for expired reservations every five seconds. See the
-[M5B milestone](docs/milestones/M5B-grpc-services.md) for configuration and
-local-development transport notes.
+Product listens on `:50051`, Inventory on `:50052`, and Order on `:8080` by
+default. Local gRPC transport is plaintext; production TLS or mTLS is deferred.
+See the [M5C milestone](docs/milestones/M5C-order-grpc-integration.md) for retry
+and environment configuration.
 
 Create an order:
 

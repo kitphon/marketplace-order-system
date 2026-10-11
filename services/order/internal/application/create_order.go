@@ -85,7 +85,7 @@ func (uc *CreateOrder) Execute(
 		return nil, fmt.Errorf("get product snapshots: %w", err)
 	}
 
-	orderItems, err := createOrderItems(command.Items, products)
+	orderItems, currency, err := createOrderItems(command.Items, products)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (uc *CreateOrder) Execute(
 		command.IdempotencyKey,
 		requestHash,
 		orderItems,
-		domain.CurrencyTHB,
+		currency,
 		now,
 	)
 	if err != nil {
@@ -209,23 +209,31 @@ func hashCreateOrderRequest(items []CreateOrderItem) (string, error) {
 func createOrderItems(
 	requested []CreateOrderItem,
 	products []ports.ProductSnapshot,
-) ([]domain.OrderItem, error) {
+) ([]domain.OrderItem, string, error) {
 	byID := make(map[string]ports.ProductSnapshot, len(products))
 	for _, product := range products {
 		if _, exists := byID[product.ProductID]; exists {
-			return nil, fmt.Errorf("%w: duplicate %s", ErrUnexpectedProduct, product.ProductID)
+			return nil, "", fmt.Errorf("%w: duplicate %s", ErrUnexpectedProduct, product.ProductID)
 		}
 		byID[product.ProductID] = product
 	}
 
 	items := make([]domain.OrderItem, 0, len(requested))
+	var currency string
+	currencySet := false
 	for _, requestedItem := range requested {
 		product, exists := byID[requestedItem.ProductID]
 		if !exists {
-			return nil, fmt.Errorf("%w: %s", ErrProductNotFound, requestedItem.ProductID)
+			return nil, "", fmt.Errorf("%w: %s", ErrProductNotFound, requestedItem.ProductID)
 		}
 		if !product.Active {
-			return nil, fmt.Errorf("%w: %s", ErrProductInactive, requestedItem.ProductID)
+			return nil, "", fmt.Errorf("%w: %s", ErrProductInactive, requestedItem.ProductID)
+		}
+		if !currencySet {
+			currency = product.Currency
+			currencySet = true
+		} else if product.Currency != currency {
+			return nil, "", ErrMixedProductCurrencies
 		}
 		item, err := domain.NewOrderItem(
 			product.ProductID,
@@ -235,11 +243,11 @@ func createOrderItems(
 			requestedItem.Quantity,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("create order item %s: %w", requestedItem.ProductID, err)
+			return nil, "", fmt.Errorf("create order item %s: %w", requestedItem.ProductID, err)
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return items, currency, nil
 }
 
 func reservationItems(items []CreateOrderItem) []ports.ReservationItem {

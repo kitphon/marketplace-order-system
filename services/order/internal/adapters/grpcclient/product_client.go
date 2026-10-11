@@ -85,7 +85,7 @@ func mapProductError(ctx context.Context, exhausted bool, err error) error {
 		return parentErr
 	}
 	if errors.Is(err, context.Canceled) || status.Code(err) == codes.Canceled {
-		return context.Canceled
+		return fmt.Errorf("%w: upstream canceled request", ports.ErrProductUnavailable)
 	}
 	if exhausted {
 		return fmt.Errorf("%w: %v", ports.ErrProductUnavailable, err)

@@ -140,6 +140,32 @@ func TestProductClientPropagatesCanceledOrExpiredParentWithoutAttempt(t *testing
 	}
 }
 
+func TestProductClientMapsUpstreamCancellationToUnavailableWithoutRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "gRPC canceled", err: status.Error(codes.Canceled, "upstream canceled")},
+		{name: "raw context canceled", err: context.Canceled},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeProductServiceClient{errors: []error{test.err}}
+			client := NewProductClient(service, testPolicy(t, 3))
+			_, err := client.GetByIDs(context.Background(), []string{"product-001"})
+			if !errors.Is(err, ports.ErrProductUnavailable) {
+				t.Fatalf("GetByIDs() error = %v, want ErrProductUnavailable", err)
+			}
+			if errors.Is(err, context.Canceled) {
+				t.Fatalf("GetByIDs() error = %v, must not identify as context.Canceled", err)
+			}
+			if service.calls != 1 {
+				t.Fatalf("calls = %d, want 1", service.calls)
+			}
+		})
+	}
+}
+
 type fakeProductServiceClient struct {
 	calls     int
 	requests  []*productv1.GetProductsRequest

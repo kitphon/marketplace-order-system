@@ -149,12 +149,29 @@ func TestInventoryClientPropagatesParentCancellationAndDeadline(t *testing.T) {
 	}
 }
 
-func TestInventoryClientMapsUpstreamCanceledWithoutRetry(t *testing.T) {
-	service := &fakeInventoryServiceClient{errors: []error{status.Error(codes.Canceled, "request canceled")}}
-	client := NewInventoryClient(service, testPolicy(t, 3))
-	err := client.Reserve(context.Background(), reserveRequest(time.Now().Add(time.Hour)))
-	if !errors.Is(err, context.Canceled) || service.calls != 1 {
-		t.Fatalf("Reserve() error = %v, calls = %d", err, service.calls)
+func TestInventoryClientMapsUpstreamCancellationToUnavailableWithoutRetry(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "gRPC canceled", err: status.Error(codes.Canceled, "upstream canceled")},
+		{name: "raw context canceled", err: context.Canceled},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeInventoryServiceClient{errors: []error{test.err}}
+			client := NewInventoryClient(service, testPolicy(t, 3))
+			err := client.Reserve(context.Background(), reserveRequest(time.Now().Add(time.Hour)))
+			if !errors.Is(err, ports.ErrInventoryUnavailable) {
+				t.Fatalf("Reserve() error = %v, want ErrInventoryUnavailable", err)
+			}
+			if errors.Is(err, context.Canceled) {
+				t.Fatalf("Reserve() error = %v, must not identify as context.Canceled", err)
+			}
+			if service.calls != 1 {
+				t.Fatalf("calls = %d, want 1", service.calls)
+			}
+		})
 	}
 }
 

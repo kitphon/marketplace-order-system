@@ -67,6 +67,9 @@ If the parent is canceled or reaches its deadline, the adapter stops before
 another attempt and returns `context.Canceled` or `context.DeadlineExceeded`
 unchanged. Exhausted retryable Product and Inventory calls map to
 `ErrProductUnavailable` and `ErrInventoryUnavailable` respectively.
+An upstream `Canceled` response while the parent remains active is different:
+it is not retried and maps to the appropriate dependency-unavailable error. It
+does not masquerade as caller cancellation.
 
 ## Inventory error mapping
 

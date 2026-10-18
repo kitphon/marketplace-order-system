@@ -2,10 +2,10 @@
 
 ## Goal
 
-M5D1 adds a durable MongoDB adapter for the existing Inventory repository port.
-The Inventory runtime still uses the in-memory adapter; switching composition
-roots is deferred to M5D2. No protobuf contract or Order behavior changes in
-this milestone.
+M5D1 added a durable MongoDB adapter for the existing Inventory repository port.
+At this milestone boundary the Inventory runtime still used the in-memory
+adapter; M5D2 subsequently wired the durable adapter into the composition root.
+No protobuf contract or Order behavior changed in M5D1.
 
 The in-memory repository is correct only inside one process. Restarting loses
 stock and idempotency tombstones, while multiple replicas have independent
@@ -105,7 +105,7 @@ database per run. They cover seeding, transaction atomicity, cross-instance
 idempotency and races, expiration, exactly-once stock restoration, tombstones,
 indexes, context cancellation, and corrupt documents.
 
-M5D2 remains responsible for wiring this adapter, index creation, and seeding
-into the runnable Inventory process. M6 still owns Order reconciliation for
-ambiguous Inventory outcomes. Product persistence, Kafka, outbox/inbox, and
-other reliability mechanisms remain deferred.
+M5D2 wires this adapter, index creation, and seeding into the runnable Inventory
+process. M6 still owns Order reconciliation for ambiguous Inventory outcomes.
+Product persistence, Kafka, outbox/inbox, and other reliability mechanisms
+remain deferred.

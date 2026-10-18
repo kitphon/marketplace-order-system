@@ -29,7 +29,12 @@ fi
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_id="$(date +%s)-$$"
 compose_project="mos-m5-test-${run_id}"
-database_name="order_m5_test_${run_id//-/_}"
+order_database_name="${M5_TEST_ORDER_MONGODB_DATABASE:-${M5_TEST_MONGODB_DATABASE:-order_m5_test_${run_id//-/_}}}"
+inventory_database_name="${M5_TEST_INVENTORY_MONGODB_DATABASE:-inventory_m5_test_${run_id//-/_}}"
+if [[ "${order_database_name}" == "${inventory_database_name}" ]]; then
+  echo "Order and Inventory test database names must be different" >&2
+  exit 2
+fi
 run_directory="$(mktemp -d "${TMPDIR:-/tmp}/mos-m5-test.XXXXXX")"
 binary_directory="${run_directory}/bin"
 log_directory="${run_directory}/logs"
@@ -47,7 +52,9 @@ export M5_TEST_PRODUCT_ADDR="${product_address}"
 export M5_TEST_INVENTORY_ADDR="${inventory_address}"
 export M5_TEST_ORDER_URL="http://${order_address}"
 export M5_TEST_MONGODB_URI="mongodb://127.0.0.1:${mongodb_port}/?replicaSet=rs0&directConnection=true"
-export M5_TEST_MONGODB_DATABASE="${database_name}"
+export M5_TEST_ORDER_MONGODB_DATABASE="${order_database_name}"
+export M5_TEST_INVENTORY_MONGODB_DATABASE="${inventory_database_name}"
+export M5_TEST_MONGODB_DATABASE="${order_database_name}"
 export M5_TEST_RUN_ID="${run_id}"
 
 product_pid=""
@@ -98,6 +105,7 @@ cleanup() {
   trap - EXIT INT TERM
   if [[ -n "${watchdog_pid}" ]]; then
     kill "${watchdog_pid}" 2>/dev/null || true
+    wait "${watchdog_pid}" 2>/dev/null || true
   fi
   if [[ "${status}" -ne 0 ]]; then
     print_logs
@@ -156,6 +164,7 @@ echo "Building service binaries..."
 go -C "${repository_root}/services/product" build -o "${binary_directory}/product" ./cmd/grpc
 go -C "${repository_root}/services/inventory" build -o "${binary_directory}/inventory" ./cmd/grpc
 go -C "${repository_root}/services/order" build -o "${binary_directory}/order" ./cmd/api
+export M5_TEST_INVENTORY_BINARY="${binary_directory}/inventory"
 
 echo "Starting isolated MongoDB replica set (${compose_project})..."
 compose_started=1
@@ -166,31 +175,53 @@ PRODUCT_GRPC_ADDR="${product_address}" \
   "${binary_directory}/product" >"${log_directory}/product.log" 2>&1 &
 product_pid=$!
 
-INVENTORY_GRPC_ADDR="${inventory_address}" \
-  "${binary_directory}/inventory" >"${log_directory}/inventory.log" 2>&1 &
-inventory_pid=$!
+start_inventory() {
+  INVENTORY_GRPC_ADDR="${inventory_address}" \
+  MONGODB_URI="${M5_TEST_MONGODB_URI}" \
+  MONGODB_DATABASE="${inventory_database_name}" \
+    "${binary_directory}/inventory" >>"${log_directory}/inventory.log" 2>&1 &
+  inventory_pid=$!
+}
+
+: >"${log_directory}/inventory.log"
+start_inventory
 
 HTTP_ADDR="${order_address}" \
 PRODUCT_GRPC_ADDR="${product_address}" \
 INVENTORY_GRPC_ADDR="${inventory_address}" \
 MONGODB_URI="${M5_TEST_MONGODB_URI}" \
-MONGODB_DATABASE="${database_name}" \
+MONGODB_DATABASE="${order_database_name}" \
   "${binary_directory}/order" >"${log_directory}/order.log" 2>&1 &
 order_pid=$!
 
-case "${mode}" in
-  integration) test_pattern='^TestIntegration$' ;;
-  smoke) test_pattern='^TestSmoke$' ;;
-  all) test_pattern='^Test(Integration|Smoke)$' ;;
-esac
+run_tests() {
+  local test_pattern="$1"
+  go -C "${repository_root}/services/order" test \
+    -tags=integration \
+    ./integration \
+    -run "${test_pattern}" \
+    -count=1 \
+    -timeout=90s \
+    -v
+}
 
 echo "Running ${mode} black-box tests..."
-go -C "${repository_root}/services/order" test \
-  -tags=integration \
-  ./integration \
-  -run "${test_pattern}" \
-  -count=1 \
-  -timeout=90s \
-  -v
+case "${mode}" in
+  smoke)
+    run_tests '^TestSmoke$'
+    ;;
+  integration|all)
+    run_tests '^Test(Integration|InventoryRuntimePersistenceBeforeRestart|InventoryStartupFailsWithoutMongoDB)$'
+    echo "Restarting Inventory service to verify durable state..."
+    stop_child "${inventory_pid}"
+    inventory_pid=""
+    start_inventory
+    if [[ "${mode}" == "all" ]]; then
+      run_tests '^Test(InventoryRuntimePersistenceAfterRestart|Smoke)$'
+    else
+      run_tests '^TestInventoryRuntimePersistenceAfterRestart$'
+    fi
+    ;;
+esac
 
 echo "${mode} tests passed"

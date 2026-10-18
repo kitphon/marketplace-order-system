@@ -15,7 +15,8 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - **M5A — gRPC contracts:** Versioned Product and Inventory Protobuf APIs, structured Inventory failure details, generated Go packages, and reproducible Buf generation.
 - **M5B — gRPC services:** Independently runnable Product and Inventory gRPC processes, Clean Architecture service layers, in-memory repositories, atomic idempotent Inventory reservations, expiration, structured errors, health services, and graceful shutdown.
 - **M5C — Order gRPC integration:** Order-side Product and Inventory adapters, structured error mapping, bounded context-aware retries, currency propagation, and long-lived runtime connections. M5 service boundaries are complete.
-- **M5D1 — Inventory MongoDB repository:** Durable stock and reservation documents, transactional idempotent reservations, versioned expiration with exactly-once stock restoration, seed-if-absent behavior, and real replica-set integration tests. Runtime wiring remains deferred to M5D2.
+- **M5D1 — Inventory MongoDB repository:** Durable stock and reservation documents, transactional idempotent reservations, versioned expiration with exactly-once stock restoration, seed-if-absent behavior, and real replica-set integration tests. Runtime wiring was delivered in M5D2.
+- **M5D2 — Inventory MongoDB runtime:** Runnable Inventory composition root backed only by the durable repository, fail-fast MongoDB initialization, index and insert-only stock setup, bounded lifecycle management, isolated service databases, and restart persistence verification. M5D is complete.
 
 ## Current architecture
 
@@ -25,11 +26,11 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - MongoDB Go Driver v2 persists Order aggregates as embedded documents.
 - The Order runtime uses outbound Product and Inventory gRPC adapters; memory clients remain available only for focused tests.
 - Standalone Product and Inventory processes implement the M5A gRPC contracts on `:50051` and `:50052` by default.
-- Each new service follows gRPC adapter → application use case → repository port → in-memory repository adapter.
+- Product follows gRPC adapter → application use case → repository port → in-memory repository adapter. Inventory follows the same boundaries with MongoDB as its runtime repository; its in-memory adapter remains for focused tests.
 - The Order, Product, and Inventory command packages are independent composition roots that own their concrete dependency wiring.
 - The Order composition root owns two long-lived gRPC connections and closes them during shutdown. Product and Inventory do not participate in Order health endpoints.
 - The M5 black-box suite builds all three service binaries, connects over real TCP, and uses an isolated MongoDB 8.0 replica set per run.
-- A MongoDB Inventory adapter implements the existing repository port, but the runnable Inventory composition root intentionally continues to use the in-memory adapter until M5D2.
+- The Inventory composition root owns one long-lived MongoDB client and uses one repository instance for reservation and expiration. Order and Inventory use separate service-owned databases.
 
 ## Decisions and invariants
 
@@ -43,12 +44,12 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - Inventory reservation uses `order_id` as its idempotency identity.
 - Inventory business failures are represented by versioned enums and structured details rather than parsed error strings.
 - Inventory compares a canonical, order-independent item payload. An identical retry preserves the original reservation ID and expiry and never decrements stock twice.
-- Inventory reservation creation, expiration, and stock restoration are serialized by one in-process mutex. Expired records remain as idempotency tombstones, and stock is restored exactly once.
-- The in-memory Inventory repository is safe only within one process. Multiple production replicas require shared durable storage with transactional or conditional updates; a Distributed Lock is not the correctness mechanism.
+- The retained in-memory Inventory repository serializes reservation creation, expiration, and stock restoration with one process-local mutex and is used only by focused tests.
+- The runnable Inventory service uses shared durable MongoDB transactions and conditional versioned updates. A Distributed Lock is not the correctness mechanism.
 - Product currency crosses the gRPC and port boundaries. Create Order requires one consistent currency, while the domain remains authoritative for the currently supported THB currency.
 - Order-side adapters exclusively own bounded retries for `Unavailable` and per-attempt `DeadlineExceeded`; no gRPC service-config retry policy is configured.
 - Parent cancellation and deadlines stop retries immediately and cross the adapter boundary unchanged.
-- Full-stack tests use unique Compose project, volume, and database names and remove only their own resources after success, failure, interruption, or timeout.
+- Full-stack tests use unique Compose project and volume names, separate unique Order and Inventory databases, and remove only their own resources after success, failure, interruption, or timeout.
 - Durable Inventory reservations use snapshot/primary/majority multi-document transactions. Conditional stock decrements prevent negative availability, while versioned reservation transitions ensure stock is restored once across concurrent expiration workers.
 - Inventory stock seeding is insert-only: concurrent `$setOnInsert` upserts never reset existing availability or versions.
 
@@ -58,7 +59,7 @@ Create Order persists `PENDING` before reserving Inventory. If Inventory reserve
 
 ## Explicitly deferred
 
-- Durable Product storage and Inventory runtime wiring
+- Durable Product storage
 - Kafka domain events
 - Transactional outbox and consumer inbox patterns
 - Redis-based concurrency controls
@@ -68,7 +69,7 @@ Create Order persists `PENDING` before reserving Inventory. If Inventory reserve
 
 ## Next milestone
 
-M5D1 is complete, but the broader M5D milestone is not. M5D2 should wire the durable Inventory adapter into the runnable process. M6 should then address ambiguous Inventory outcomes and stale-`PENDING` reconciliation before asynchronous messaging.
+M5D is complete. M6 should address ambiguous Inventory outcomes and stale-`PENDING` reconciliation before asynchronous messaging.
 
 ## Last verification
 
@@ -119,4 +120,14 @@ M5D1 repository verification on 2026-10-18 with Go 1.27.1 against `go 1.25.0` di
 - `go -C services/inventory test -race ./...` — passed.
 - Build-tagged Inventory MongoDB integration tests — passed under the race detector against an isolated MongoDB 8.0 replica set.
 - `make verify` — passed repository-wide vet, unit, and race tests in all four Go modules.
+- `git diff --check` — passed.
+
+M5D2 runtime verification on 2026-10-18 with Go 1.27.1 against `go 1.25.0` directives:
+
+- `gofmt -w` on the changed Go files, `go work sync`, and `bash -n scripts/test-stack.sh` — passed.
+- `make vet`, `make test`, and `make test-race` — passed across all four Go modules.
+- Build-tagged Inventory MongoDB integration tests — passed against an isolated MongoDB 8.0 replica set.
+- `make integration` — passed all existing black-box scenarios plus persisted Inventory document, index, idempotency, conflict, fail-fast startup, and restart-survival checks.
+- `make smoke` — passed the real-process happy path and idempotent retry against durable Inventory storage.
+- `make verify-all` — passed; it reran the fast verification and then integration, Inventory restart, and smoke groups in one isolated stack lifecycle.
 - `git diff --check` — passed.

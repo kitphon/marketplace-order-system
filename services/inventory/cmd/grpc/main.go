@@ -8,15 +8,18 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	inventoryv1 "github.com/kitphon/marketplace-order-system/contracts/inventory/v1"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/adapters/grpcserver"
-	"github.com/kitphon/marketplace-order-system/services/inventory/internal/adapters/memory"
+	"github.com/kitphon/marketplace-order-system/services/inventory/internal/adapters/mongodb"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/adapters/system"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/application"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/domain"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -25,29 +28,86 @@ import (
 const (
 	defaultAddress            = ":50052"
 	defaultExpirationInterval = 5 * time.Second
+	defaultMongoDBURI         = "mongodb://localhost:27017/?replicaSet=rs0&directConnection=true"
+	defaultMongoDBDatabase    = "inventory_db"
+	startupTimeout            = 10 * time.Second
+	shutdownTimeout           = 10 * time.Second
 )
 
+type config struct {
+	address            string
+	expirationInterval time.Duration
+	mongodbURI         string
+	mongodbDatabase    string
+}
+
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx); err != nil {
 		slog.Error("inventory service stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	address := envOrDefault("INVENTORY_GRPC_ADDR", defaultAddress)
+func loadConfig() (config, error) {
 	expirationInterval, err := durationEnv("INVENTORY_EXPIRATION_INTERVAL", defaultExpirationInterval)
+	if err != nil {
+		return config{}, err
+	}
+	address := envOrDefault("INVENTORY_GRPC_ADDR", defaultAddress)
+	if _, err := net.ResolveTCPAddr("tcp", address); err != nil {
+		return config{}, fmt.Errorf("INVENTORY_GRPC_ADDR is invalid: %w", err)
+	}
+	mongodbURI := strings.TrimSpace(envOrDefault("MONGODB_URI", defaultMongoDBURI))
+	if mongodbURI == "" {
+		return config{}, fmt.Errorf("MONGODB_URI must not be blank")
+	}
+	mongodbDatabase := strings.TrimSpace(envOrDefault("MONGODB_DATABASE", defaultMongoDBDatabase))
+	if mongodbDatabase == "" {
+		return config{}, fmt.Errorf("MONGODB_DATABASE must not be blank")
+	}
+	return config{
+		address:            address,
+		expirationInterval: expirationInterval,
+		mongodbURI:         mongodbURI,
+		mongodbDatabase:    mongodbDatabase,
+	}, nil
+}
+
+func run(ctx context.Context) error {
+	configuration, err := loadConfig()
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", address)
+
+	client, err := mongo.Connect(options.Client().ApplyURI(configuration.mongodbURI))
+	if err != nil {
+		return fmt.Errorf("connect to MongoDB: %w", err)
+	}
+	defer disconnectMongo(client)
+
+	startupContext, cancelStartup := context.WithTimeout(ctx, startupTimeout)
+	defer cancelStartup()
+	if err := client.Ping(startupContext, nil); err != nil {
+		return fmt.Errorf("ping MongoDB: %w", err)
+	}
+	repository := mongodb.NewInventoryRepository(client.Database(configuration.mongodbDatabase))
+	if err := repository.EnsureIndexes(startupContext); err != nil {
+		return fmt.Errorf("initialize Inventory indexes: %w", err)
+	}
+	if err := repository.SeedStocks(startupContext, seedStock()); err != nil {
+		return fmt.Errorf("seed Inventory stock: %w", err)
+	}
+	cancelStartup()
+
+	listener, err := net.Listen("tcp", configuration.address)
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
 
 	clock := system.Clock{}
-	repository := memory.NewInventoryRepository(seedStock())
 	reserve := application.NewReserveInventory(repository, clock, system.IDGenerator{})
 	expire := application.NewExpireReservations(repository, clock)
 	service := grpcserver.New(reserve)
@@ -58,35 +118,65 @@ func run() error {
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
 	healthServer.SetServingStatus(inventoryv1.InventoryService_ServiceDesc.ServiceName, healthpb.HealthCheckResponse_SERVING)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	go application.RunExpirationLoop(ctx, expirationInterval, expire, func(err error) {
-		slog.Error("expire inventory reservations", "error", err)
-	})
+	runtimeContext, stopRuntime := context.WithCancel(ctx)
+	defer stopRuntime()
+	expirationDone := make(chan struct{})
+	go func() {
+		defer close(expirationDone)
+		application.RunExpirationLoop(runtimeContext, configuration.expirationInterval, expire, func(err error) {
+			slog.Error("expire inventory reservations", "error", err)
+		})
+	}()
 
 	serverErrors := make(chan error, 1)
 	go func() {
 		slog.Info(
 			"inventory gRPC service listening",
-			"address", address,
-			"expiration_interval", expirationInterval,
+			"address", configuration.address,
+			"expiration_interval", configuration.expirationInterval,
+			"mongodb_database", configuration.mongodbDatabase,
 			"transport", "plaintext-local-development",
 		)
 		serverErrors <- grpcServer.Serve(listener)
 	}()
 
+	var serviceErr error
 	select {
 	case err := <-serverErrors:
-		if errors.Is(err, grpc.ErrServerStopped) {
-			return nil
+		if !errors.Is(err, grpc.ErrServerStopped) {
+			serviceErr = err
 		}
-		return err
 	case <-ctx.Done():
 	}
 
+	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+	healthServer.SetServingStatus(
+		inventoryv1.InventoryService_ServiceDesc.ServiceName,
+		healthpb.HealthCheckResponse_NOT_SERVING,
+	)
 	healthServer.Shutdown()
-	gracefulStop(grpcServer, 10*time.Second)
-	return nil
+	stopRuntime()
+	gracefulStop(grpcServer, shutdownTimeout)
+	waitForExpirationLoop(expirationDone, shutdownTimeout)
+	return serviceErr
+}
+
+func waitForExpirationLoop(done <-chan struct{}, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		slog.Warn("timed out waiting for Inventory expiration loop to stop")
+	}
+}
+
+func disconnectMongo(client *mongo.Client) {
+	shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := client.Disconnect(shutdownContext); err != nil {
+		slog.Error("disconnect Inventory MongoDB client", "error", err)
+	}
 }
 
 func seedStock() []domain.Stock {

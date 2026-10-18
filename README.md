@@ -14,11 +14,14 @@ introduced only after reproducing the failure that motivates it.
 - [M5A — Versioned Product and Inventory gRPC contracts](docs/milestones/M5A-grpc-contracts.md)
 - [M5B — Runnable Product and Inventory gRPC services](docs/milestones/M5B-grpc-services.md)
 - [M5C — Order-side gRPC integration](docs/milestones/M5C-order-grpc-integration.md)
+- [M5D1 — Inventory MongoDB repository](docs/milestones/M5D1-inventory-mongodb-repository.md)
+- [M5D2 — Inventory MongoDB runtime](docs/milestones/M5D2-inventory-mongodb-runtime.md)
 
 ## Current runnable milestone: M5 — gRPC service boundaries
 
 The Order Service now calls the standalone Product and Inventory services
-through versioned gRPC adapters. MongoDB remains the Order persistence layer.
+through versioned gRPC adapters. MongoDB persists both Order aggregates and
+Inventory stock and reservations in service-owned databases.
 
 Implemented:
 
@@ -52,6 +55,8 @@ Implemented:
 - Product currency propagation and consistent-currency validation
 - Long-lived Product and Inventory gRPC connections in the Order runtime
 - Reproducible real-process M5 integration and smoke tests
+- Durable transactional MongoDB Inventory repository and runtime wiring
+- Restart-safe Inventory idempotency, stock, expiration, and seed-if-absent state
 
 Not implemented yet:
 
@@ -77,14 +82,18 @@ make verify-all   # fast checks, then both full-stack groups in one stack lifecy
 
 The full-stack runner builds and starts the real Product, Inventory, and Order
 binaries over TCP and provisions an isolated MongoDB 8.0 replica set. Every run
-uses a unique Compose project, volume, and database, then removes only those
-resources. On failure it prints separate service logs before cleanup.
+uses a unique Compose project and volume plus separate unique Order and
+Inventory databases, then removes only those resources. On failure it prints
+separate service logs before cleanup.
 
 Test addresses default to Product `127.0.0.1:55051`, Inventory
 `127.0.0.1:55052`, Order `127.0.0.1:58080`, and MongoDB port `57017`. Override
 them with `M5_TEST_PRODUCT_ADDR`, `M5_TEST_INVENTORY_ADDR`,
 `M5_TEST_ORDER_ADDR`, and `M5_TEST_MONGODB_PORT`; set the overall bound with
-`M5_TEST_TIMEOUT_SECONDS`. Occupied ports fail early with a clear error.
+`M5_TEST_TIMEOUT_SECONDS`. Database names can be overridden with
+`M5_TEST_ORDER_MONGODB_DATABASE` and
+`M5_TEST_INVENTORY_MONGODB_DATABASE`. Occupied ports fail early with a clear
+error.
 
 Run the MongoDB integration tests:
 
@@ -102,7 +111,8 @@ go -C services/product run ./cmd/grpc
 ```
 
 ```bash
-go -C services/inventory run ./cmd/grpc
+MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
+  go -C services/inventory run ./cmd/grpc
 ```
 
 Then run the Order API:
@@ -115,7 +125,8 @@ MONGODB_URI='mongodb://localhost:27017/?replicaSet=rs0&directConnection=true' \
 Product listens on `:50051`, Inventory on `:50052`, and Order on `:8080` by
 default. Local gRPC transport is plaintext; production TLS or mTLS is deferred.
 See the [M5C milestone](docs/milestones/M5C-order-grpc-integration.md) for retry
-and environment configuration.
+configuration and the [M5D2 milestone](docs/milestones/M5D2-inventory-mongodb-runtime.md)
+for Inventory persistence configuration and lifecycle behavior.
 
 Create an order:
 

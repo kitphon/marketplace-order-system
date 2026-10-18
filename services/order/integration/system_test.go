@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -178,23 +181,171 @@ func TestSmoke(t *testing.T) {
 	}
 }
 
+func TestInventoryRuntimePersistenceBeforeRestart(t *testing.T) {
+	configuration := loadConfiguration()
+	waitForNamedHealth(t, configuration.inventoryAddress, inventoryv1.InventoryService_ServiceDesc.ServiceName)
+	database := openInventoryDatabase(t, configuration)
+	assertInventoryIndexes(t, database)
+
+	before := loadInventoryStock(t, database, "product-002")
+	request := &inventoryv1.ReserveInventoryRequest{
+		OrderId: uniqueID(configuration, "runtime-persistence"),
+		Items: []*inventoryv1.ReservationItem{{
+			ProductId: "product-002",
+			Quantity:  2,
+		}},
+		ExpiresAt: timestamppb.New(time.Now().UTC().Add(30 * time.Minute).Truncate(time.Millisecond)),
+	}
+	client := inventoryClient(t, configuration)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	first, err := client.ReserveInventory(ctx, request)
+	if err != nil {
+		t.Fatalf("first runtime ReserveInventory() error = %v", err)
+	}
+	persisted := loadInventoryReservation(t, database, request.OrderId)
+	if persisted.ID != first.ReservationId || persisted.Status != "RESERVED" || persisted.Version != 1 {
+		t.Fatalf("persisted reservation = %+v, response ID = %q", persisted, first.ReservationId)
+	}
+	afterFirst := loadInventoryStock(t, database, "product-002")
+	if afterFirst.Available != before.Available-2 || afterFirst.Version != before.Version+1 {
+		t.Fatalf("stock after first reservation = %+v, before = %+v", afterFirst, before)
+	}
+
+	second, err := client.ReserveInventory(ctx, request)
+	if err != nil {
+		t.Fatalf("identical runtime ReserveInventory() error = %v", err)
+	}
+	if second.ReservationId != first.ReservationId || !second.ExpiresAt.AsTime().Equal(first.ExpiresAt.AsTime()) {
+		t.Fatalf("identical retry = %+v, first = %+v", second, first)
+	}
+	assertInventoryStock(t, database, "product-002", afterFirst)
+	assertInventoryReservationCount(t, database, request.OrderId, 1)
+
+	conflict := &inventoryv1.ReserveInventoryRequest{
+		OrderId: request.OrderId,
+		Items: []*inventoryv1.ReservationItem{{
+			ProductId: "product-002",
+			Quantity:  3,
+		}},
+		ExpiresAt: request.ExpiresAt,
+	}
+	_, err = client.ReserveInventory(ctx, conflict)
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("runtime conflict code = %v, want AlreadyExists; error=%v", status.Code(err), err)
+	}
+	assertInventoryReason(t, err, inventoryv1.InventoryFailureReason_INVENTORY_FAILURE_REASON_RESERVATION_CONFLICT)
+	assertInventoryStock(t, database, "product-002", afterFirst)
+	afterConflict := loadInventoryReservation(t, database, request.OrderId)
+	if !reflect.DeepEqual(afterConflict, persisted) {
+		t.Fatalf("reservation changed after conflict: before=%+v after=%+v", persisted, afterConflict)
+	}
+}
+
+func TestInventoryRuntimePersistenceAfterRestart(t *testing.T) {
+	configuration := loadConfiguration()
+	waitForNamedHealth(t, configuration.inventoryAddress, inventoryv1.InventoryService_ServiceDesc.ServiceName)
+	database := openInventoryDatabase(t, configuration)
+	persisted := loadInventoryReservation(t, database, uniqueID(configuration, "runtime-persistence"))
+	stockBeforeRetry := loadInventoryStock(t, database, "product-002")
+	if stockBeforeRetry.Available == 100 {
+		t.Fatal("Inventory startup seed reset product-002 stock to 100")
+	}
+
+	request := &inventoryv1.ReserveInventoryRequest{
+		OrderId: persisted.OrderID,
+		Items: []*inventoryv1.ReservationItem{{
+			ProductId: "product-002",
+			Quantity:  2,
+		}},
+		ExpiresAt: timestamppb.New(time.Now().UTC().Add(time.Hour)),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	response, err := inventoryClient(t, configuration).ReserveInventory(ctx, request)
+	if err != nil {
+		t.Fatalf("post-restart ReserveInventory() error = %v", err)
+	}
+	if response.ReservationId != persisted.ID || !response.ExpiresAt.AsTime().Equal(persisted.ExpiresAt) {
+		t.Fatalf("post-restart response = %+v, persisted = %+v", response, persisted)
+	}
+	assertInventoryStock(t, database, "product-002", stockBeforeRetry)
+	assertInventoryReservationCount(t, database, persisted.OrderID, 1)
+}
+
+func TestInventoryStartupFailsWithoutMongoDB(t *testing.T) {
+	binary := os.Getenv("M5_TEST_INVENTORY_BINARY")
+	if binary == "" {
+		t.Skip("M5_TEST_INVENTORY_BINARY is not set")
+	}
+	grpcAddress := unusedLocalAddress(t)
+	mongodbAddress := unusedLocalAddress(t)
+	for mongodbAddress == grpcAddress {
+		mongodbAddress = unusedLocalAddress(t)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary)
+	command.Env = append(os.Environ(),
+		"INVENTORY_GRPC_ADDR="+grpcAddress,
+		"MONGODB_URI=mongodb://"+mongodbAddress+"/?directConnection=true&serverSelectionTimeoutMS=500",
+		"MONGODB_DATABASE=unreachable_inventory_test",
+	)
+	var output bytes.Buffer
+	command.Stdout = &output
+	command.Stderr = &output
+	if err := command.Start(); err != nil {
+		t.Fatalf("start Inventory binary: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatalf("Inventory exited successfully with unreachable MongoDB; output=%s", output.String())
+			}
+			if connection, dialErr := net.DialTimeout("tcp", grpcAddress, 50*time.Millisecond); dialErr == nil {
+				_ = connection.Close()
+				t.Fatalf("Inventory gRPC port became ready despite startup failure; output=%s", output.String())
+			}
+			return
+		case <-ticker.C:
+			connection, err := net.DialTimeout("tcp", grpcAddress, 20*time.Millisecond)
+			if err == nil {
+				_ = connection.Close()
+				cancel()
+				<-done
+				t.Fatalf("Inventory gRPC port became ready before MongoDB initialization; output=%s", output.String())
+			}
+		case <-ctx.Done():
+			<-done
+			t.Fatalf("Inventory did not fail within timeout; output=%s", output.String())
+		}
+	}
+}
+
 type testConfiguration struct {
-	productAddress   string
-	inventoryAddress string
-	orderURL         string
-	mongodbURI       string
-	mongodbDatabase  string
-	runID            string
+	productAddress    string
+	inventoryAddress  string
+	orderURL          string
+	mongodbURI        string
+	orderDatabase     string
+	inventoryDatabase string
+	runID             string
 }
 
 func loadConfiguration() testConfiguration {
 	return testConfiguration{
-		productAddress:   envOrDefault("M5_TEST_PRODUCT_ADDR", "127.0.0.1:55051"),
-		inventoryAddress: envOrDefault("M5_TEST_INVENTORY_ADDR", "127.0.0.1:55052"),
-		orderURL:         strings.TrimRight(envOrDefault("M5_TEST_ORDER_URL", "http://127.0.0.1:58080"), "/"),
-		mongodbURI:       envOrDefault("M5_TEST_MONGODB_URI", "mongodb://127.0.0.1:57017/?replicaSet=rs0&directConnection=true"),
-		mongodbDatabase:  envOrDefault("M5_TEST_MONGODB_DATABASE", "order_m5_test"),
-		runID:            envOrDefault("M5_TEST_RUN_ID", fmt.Sprintf("manual-%d", time.Now().UnixNano())),
+		productAddress:    envOrDefault("M5_TEST_PRODUCT_ADDR", "127.0.0.1:55051"),
+		inventoryAddress:  envOrDefault("M5_TEST_INVENTORY_ADDR", "127.0.0.1:55052"),
+		orderURL:          strings.TrimRight(envOrDefault("M5_TEST_ORDER_URL", "http://127.0.0.1:58080"), "/"),
+		mongodbURI:        envOrDefault("M5_TEST_MONGODB_URI", "mongodb://127.0.0.1:57017/?replicaSet=rs0&directConnection=true"),
+		orderDatabase:     envOrDefault("M5_TEST_ORDER_MONGODB_DATABASE", envOrDefault("M5_TEST_MONGODB_DATABASE", "order_m5_test")),
+		inventoryDatabase: envOrDefault("M5_TEST_INVENTORY_MONGODB_DATABASE", "inventory_m5_test"),
+		runID:             envOrDefault("M5_TEST_RUN_ID", fmt.Sprintf("manual-%d", time.Now().UnixNano())),
 	}
 }
 
@@ -218,7 +369,7 @@ func assertSinglePersistedOrder(
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	count, err := client.Database(configuration.mongodbDatabase).Collection("orders").CountDocuments(
+	count, err := client.Database(configuration.orderDatabase).Collection("orders").CountDocuments(
 		ctx,
 		bson.D{
 			{Key: "customer_id", Value: customerID},
@@ -231,6 +382,166 @@ func assertSinglePersistedOrder(
 	if count != 1 {
 		t.Fatalf("persisted logical order count = %d, want 1", count)
 	}
+}
+
+type inventoryStockDocument struct {
+	ProductID string    `bson:"_id"`
+	Available int       `bson:"available"`
+	Version   int64     `bson:"version"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
+}
+
+type inventoryReservationItemDocument struct {
+	ProductID string `bson:"product_id"`
+	Quantity  int    `bson:"quantity"`
+}
+
+type inventoryReservationDocument struct {
+	ID        string                             `bson:"_id"`
+	OrderID   string                             `bson:"order_id"`
+	Items     []inventoryReservationItemDocument `bson:"items"`
+	Status    string                             `bson:"status"`
+	ExpiresAt time.Time                          `bson:"expires_at"`
+	Version   int64                              `bson:"version"`
+	CreatedAt time.Time                          `bson:"created_at"`
+	UpdatedAt time.Time                          `bson:"updated_at"`
+}
+
+func openInventoryDatabase(t *testing.T, configuration testConfiguration) *mongo.Database {
+	t.Helper()
+	client, err := mongo.Connect(options.Client().ApplyURI(configuration.mongodbURI))
+	if err != nil {
+		t.Fatalf("connect to Inventory MongoDB: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := client.Disconnect(ctx); err != nil {
+			t.Errorf("disconnect Inventory MongoDB client: %v", err)
+		}
+	})
+	return client.Database(configuration.inventoryDatabase)
+}
+
+func loadInventoryStock(
+	t *testing.T,
+	database *mongo.Database,
+	productID string,
+) inventoryStockDocument {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var document inventoryStockDocument
+	if err := database.Collection("stocks").FindOne(
+		ctx,
+		bson.D{{Key: "_id", Value: productID}},
+	).Decode(&document); err != nil {
+		t.Fatalf("load Inventory stock %q: %v", productID, err)
+	}
+	return document
+}
+
+func assertInventoryStock(
+	t *testing.T,
+	database *mongo.Database,
+	productID string,
+	want inventoryStockDocument,
+) {
+	t.Helper()
+	if got := loadInventoryStock(t, database, productID); got != want {
+		t.Fatalf("Inventory stock %q = %+v, want %+v", productID, got, want)
+	}
+}
+
+func loadInventoryReservation(
+	t *testing.T,
+	database *mongo.Database,
+	orderID string,
+) inventoryReservationDocument {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var document inventoryReservationDocument
+	if err := database.Collection("reservations").FindOne(
+		ctx,
+		bson.D{{Key: "order_id", Value: orderID}},
+	).Decode(&document); err != nil {
+		t.Fatalf("load Inventory reservation for order %q: %v", orderID, err)
+	}
+	return document
+}
+
+func assertInventoryReservationCount(
+	t *testing.T,
+	database *mongo.Database,
+	orderID string,
+	want int64,
+) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	count, err := database.Collection("reservations").CountDocuments(
+		ctx,
+		bson.D{{Key: "order_id", Value: orderID}},
+	)
+	if err != nil {
+		t.Fatalf("count Inventory reservations: %v", err)
+	}
+	if count != want {
+		t.Fatalf("Inventory reservation count for order %q = %d, want %d", orderID, count, want)
+	}
+}
+
+func assertInventoryIndexes(t *testing.T, database *mongo.Database) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cursor, err := database.Collection("reservations").Indexes().List(ctx)
+	if err != nil {
+		t.Fatalf("list Inventory reservation indexes: %v", err)
+	}
+	defer cursor.Close(context.Background())
+	found := map[string]bool{}
+	for cursor.Next(ctx) {
+		var index struct {
+			Name   string `bson:"name"`
+			Unique bool   `bson:"unique"`
+		}
+		if err := cursor.Decode(&index); err != nil {
+			t.Fatalf("decode Inventory reservation index: %v", err)
+		}
+		if index.Name == "uq_reservations_order_id" && !index.Unique {
+			t.Fatalf("Inventory index %q is not unique", index.Name)
+		}
+		found[index.Name] = true
+	}
+	if err := cursor.Err(); err != nil {
+		t.Fatalf("iterate Inventory reservation indexes: %v", err)
+	}
+	for _, name := range []string{"uq_reservations_order_id", "ix_reservations_status_expires_at"} {
+		if !found[name] {
+			t.Fatalf("Inventory index %q not found", name)
+		}
+	}
+}
+
+func inventoryClient(t *testing.T, configuration testConfiguration) inventoryv1.InventoryServiceClient {
+	t.Helper()
+	return inventoryv1.NewInventoryServiceClient(newGRPCConnection(t, configuration.inventoryAddress))
+}
+
+func unusedLocalAddress(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate local address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release local address: %v", err)
+	}
+	return address
 }
 
 func waitForStack(t *testing.T, configuration testConfiguration) {

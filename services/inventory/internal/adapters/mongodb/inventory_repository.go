@@ -243,6 +243,9 @@ func (repository *InventoryRepository) reserveInTransaction(
 		if mapErr != nil {
 			return reserveResult{}, mapErr
 		}
+		if !sameReservationItems(existing.Items(), request.Items) {
+			return reserveResult{outcome: reserveOutcomeConflict}, nil
+		}
 		if existing.Status() == domain.ReservationStatusReserved && !request.Now.Before(existing.ExpiresAt()) {
 			expired, expireErr := repository.expireOneInTransaction(
 				ctx,
@@ -261,9 +264,6 @@ func (repository *InventoryRepository) reserveInTransaction(
 		}
 		if existing.Status() == domain.ReservationStatusExpired {
 			return reserveResult{outcome: reserveOutcomeExpired}, nil
-		}
-		if !sameReservationItems(existing.Items(), request.Items) {
-			return reserveResult{outcome: reserveOutcomeConflict}, nil
 		}
 		return reserveResult{outcome: reserveOutcomeReserved, reservation: existing}, nil
 	}

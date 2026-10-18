@@ -288,6 +288,72 @@ func TestInventoryRepositoryIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("different payload conflicts after reservation is expired", func(t *testing.T) {
+		harness.reset(t)
+		harness.seed(t, map[string]int{"product-001": 10})
+		request := reserveRequest(t, "reservation-001", "order-001", harness.now, map[string]int{"product-001": 3})
+		if _, err := harness.repository.Reserve(context.Background(), request); err != nil {
+			t.Fatalf("Reserve() error = %v", err)
+		}
+		if count, err := harness.repository.ExpireReservations(
+			context.Background(),
+			request.ExpiresAt.Add(time.Minute),
+		); err != nil || count != 1 {
+			t.Fatalf("ExpireReservations() = (%d, %v), want (1, nil)", count, err)
+		}
+
+		conflict := reserveRequest(
+			t,
+			"reservation-002",
+			"order-001",
+			harness.now,
+			map[string]int{"product-001": 4},
+		)
+		_, err := NewInventoryRepository(harness.database).Reserve(context.Background(), conflict)
+		if !errors.Is(err, ports.ErrReservationConflict) {
+			t.Fatalf("conflicting retry error = %v, want ErrReservationConflict", err)
+		}
+		assertStock(t, harness.database, "product-001", 10, 3)
+		assertReservationStatus(t, harness.database, "reservation-001", domain.ReservationStatusExpired, 2)
+	})
+
+	t.Run("different payload conflict does not lazily expire elapsed reservation", func(t *testing.T) {
+		harness.reset(t)
+		harness.seed(t, map[string]int{"product-001": 10})
+		request := reserveRequest(t, "reservation-001", "order-001", harness.now, map[string]int{"product-001": 3})
+		if _, err := harness.repository.Reserve(context.Background(), request); err != nil {
+			t.Fatalf("Reserve() error = %v", err)
+		}
+
+		conflict := reserveRequest(
+			t,
+			"reservation-002",
+			"order-001",
+			request.ExpiresAt.Add(time.Minute),
+			map[string]int{"product-001": 4},
+		)
+		_, err := NewInventoryRepository(harness.database).Reserve(context.Background(), conflict)
+		if !errors.Is(err, ports.ErrReservationConflict) {
+			t.Fatalf("conflicting retry error = %v, want ErrReservationConflict", err)
+		}
+		assertStock(t, harness.database, "product-001", 7, 2)
+		assertReservationStatus(t, harness.database, "reservation-001", domain.ReservationStatusReserved, 1)
+
+		first, err := harness.repository.ExpireReservations(context.Background(), conflict.Now)
+		if err != nil {
+			t.Fatalf("first ExpireReservations() error = %v", err)
+		}
+		second, err := harness.repository.ExpireReservations(context.Background(), conflict.Now)
+		if err != nil {
+			t.Fatalf("second ExpireReservations() error = %v", err)
+		}
+		if first != 1 || second != 0 {
+			t.Fatalf("expiration counts = (%d, %d), want (1, 0)", first, second)
+		}
+		assertStock(t, harness.database, "product-001", 10, 3)
+		assertReservationStatus(t, harness.database, "reservation-001", domain.ReservationStatusExpired, 2)
+	})
+
 	t.Run("concurrent expiration workers restore stock once", func(t *testing.T) {
 		harness.reset(t)
 		harness.seed(t, map[string]int{"product-001": 10})

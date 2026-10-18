@@ -43,9 +43,12 @@ version. Missing and insufficient stock therefore share the typed insufficient
 stock result and abort the complete transaction without partial decrements or a
 reservation document.
 
-The transaction first reads by `order_id`. An identical retry returns the
-persisted reservation ID and expiry without touching stock. A different
-canonical payload returns a reservation conflict. The unique database index is
+The transaction first reads by `order_id` and compares the canonical payload
+before considering reservation status or expiry. A different payload always
+returns a reservation conflict, whether the stored reservation is active,
+elapsed but still `RESERVED`, or already `EXPIRED`; that conflict never changes
+reservation or stock state. An identical active retry returns the persisted
+reservation ID and expiry without touching stock. The unique database index is
 the final race arbiter: if concurrent transactions both initially see no
 reservation, only one can commit, and the loser loads and classifies the
 committed winner in a fresh transaction.
@@ -63,10 +66,11 @@ version/status transition commits and restores stock. Later workers observe the
 new version or `EXPIRED` status and perform an idempotent no-op. Expired records
 remain permanent `order_id` tombstones.
 
-Reserve also performs lazy expiration when it finds an elapsed reservation.
-The callback records an expired business outcome as its result and returns no
-error, allowing expiration and restoration to commit. Only after
-`WithTransaction` succeeds does the adapter return `ErrReservationExpired`.
+For an identical payload, Reserve also performs lazy expiration when it finds
+an elapsed reservation. The callback records an expired business outcome as its
+result and returns no error, allowing expiration and restoration to commit.
+Only after `WithTransaction` succeeds does the adapter return
+`ErrReservationExpired`.
 
 ## Transaction retry behavior
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -105,6 +106,81 @@ func TestInventoryRepositoryIntegration(t *testing.T) {
 		}
 		assertStock(t, harness.database, "product-001", 8, 2)
 		assertStock(t, harness.database, "product-002", 5, 2)
+	})
+
+	t.Run("lookup returns durable reserved and expired reservations without writes", func(t *testing.T) {
+		harness.reset(t)
+		harness.seed(t, map[string]int{"product-001": 10})
+		request := reserveRequest(t, "reservation-001", "order-001", harness.now, map[string]int{"product-001": 2})
+		created, err := harness.repository.Reserve(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Reserve() error = %v", err)
+		}
+		beforeStock := loadStockDocument(t, harness.database, "product-001")
+		beforeReservation := loadReservationDocument(t, harness.database, "order-001")
+
+		lookedUp, err := NewInventoryRepository(harness.database).FindReservationByOrderID(context.Background(), "order-001")
+		if err != nil {
+			t.Fatalf("FindReservationByOrderID() error = %v", err)
+		}
+		if lookedUp.ID() != created.ID() || lookedUp.OrderID() != created.OrderID() ||
+			lookedUp.Status() != domain.ReservationStatusReserved ||
+			!lookedUp.ExpiresAt().Equal(created.ExpiresAt()) ||
+			!reflect.DeepEqual(lookedUp.Items(), created.Items()) {
+			t.Fatalf("lookup = %+v, created = %+v", lookedUp, created)
+		}
+		if got := loadStockDocument(t, harness.database, "product-001"); !reflect.DeepEqual(got, beforeStock) {
+			t.Fatalf("stock changed during lookup: before=%+v after=%+v", beforeStock, got)
+		}
+		if got := loadReservationDocument(t, harness.database, "order-001"); !reflect.DeepEqual(got, beforeReservation) {
+			t.Fatalf("reservation changed during lookup: before=%+v after=%+v", beforeReservation, got)
+		}
+
+		if count, err := harness.repository.ExpireReservations(context.Background(), request.ExpiresAt); err != nil || count != 1 {
+			t.Fatalf("ExpireReservations() = (%d, %v), want (1, nil)", count, err)
+		}
+		expiredBefore := loadReservationDocument(t, harness.database, "order-001")
+		expired, err := NewInventoryRepository(harness.database).FindReservationByOrderID(context.Background(), "order-001")
+		if err != nil {
+			t.Fatalf("expired FindReservationByOrderID() error = %v", err)
+		}
+		if expired.Status() != domain.ReservationStatusExpired || expired.ID() != created.ID() ||
+			!expired.ExpiresAt().Equal(created.ExpiresAt()) {
+			t.Fatalf("expired lookup = %+v", expired)
+		}
+		if got := loadReservationDocument(t, harness.database, "order-001"); !reflect.DeepEqual(got, expiredBefore) {
+			t.Fatalf("expired tombstone changed during lookup: before=%+v after=%+v", expiredBefore, got)
+		}
+	})
+
+	t.Run("lookup maps missing context and corrupt documents", func(t *testing.T) {
+		harness.reset(t)
+		if _, err := harness.repository.FindReservationByOrderID(context.Background(), "missing"); !errors.Is(err, ports.ErrReservationNotFound) {
+			t.Fatalf("missing error = %v, want ErrReservationNotFound", err)
+		}
+		canceled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := harness.repository.FindReservationByOrderID(canceled, "order-001"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled error = %v, want context.Canceled", err)
+		}
+		deadline, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer deadlineCancel()
+		if _, err := harness.repository.FindReservationByOrderID(deadline, "order-001"); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("deadline error = %v, want context.DeadlineExceeded", err)
+		}
+
+		document := newReservationDocument(
+			"reservation-corrupt", "order-corrupt", reservationItems(t, map[string]int{"product-001": 1}),
+			harness.now.Add(time.Hour), harness.now,
+		)
+		document.Status = "LOST"
+		if _, err := harness.database.Collection(reservationsCollection).InsertOne(context.Background(), document); err != nil {
+			t.Fatalf("insert corrupt reservation: %v", err)
+		}
+		if _, err := harness.repository.FindReservationByOrderID(context.Background(), "order-corrupt"); err == nil ||
+			errors.Is(err, ports.ErrReservationNotFound) {
+			t.Fatalf("corrupt lookup error = %v, want corruption failure", err)
+		}
 	})
 
 	t.Run("same order with different payload conflicts", func(t *testing.T) {
@@ -622,6 +698,28 @@ func assertStock(t *testing.T, database *mongo.Database, productID string, avail
 	if document.Available < 0 {
 		t.Fatalf("stock %q became negative: %d", productID, document.Available)
 	}
+}
+
+func loadStockDocument(t *testing.T, database *mongo.Database, productID string) stockDocument {
+	t.Helper()
+	var document stockDocument
+	if err := database.Collection(stocksCollection).FindOne(
+		context.Background(), bson.D{{Key: "_id", Value: productID}},
+	).Decode(&document); err != nil {
+		t.Fatalf("load stock %q: %v", productID, err)
+	}
+	return document
+}
+
+func loadReservationDocument(t *testing.T, database *mongo.Database, orderID string) reservationDocument {
+	t.Helper()
+	var document reservationDocument
+	if err := database.Collection(reservationsCollection).FindOne(
+		context.Background(), bson.D{{Key: "order_id", Value: orderID}},
+	).Decode(&document); err != nil {
+		t.Fatalf("load reservation for order %q: %v", orderID, err)
+	}
+	return document
 }
 
 func assertReservationCount(t *testing.T, database *mongo.Database, filter bson.D, want int64) {

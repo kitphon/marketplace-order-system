@@ -13,6 +13,7 @@ var (
 	ErrInsufficientStock   = errors.New("insufficient stock")
 	ErrReservationConflict = errors.New("reservation conflict")
 	ErrReservationExpired  = errors.New("reservation expired")
+	ErrReservationNotFound = errors.New("reservation not found")
 )
 
 type InsufficientStockError struct {
@@ -35,5 +36,6 @@ type ReserveRequest struct {
 
 type InventoryRepository interface {
 	Reserve(ctx context.Context, request ReserveRequest) (*domain.Reservation, error)
+	FindReservationByOrderID(ctx context.Context, orderID string) (*domain.Reservation, error)
 	ExpireReservations(ctx context.Context, now time.Time) (int, error)
 }

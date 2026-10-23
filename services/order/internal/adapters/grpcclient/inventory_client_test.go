@@ -234,3 +234,11 @@ func (client *fakeInventoryServiceClient) ReserveInventory(
 	}
 	return response, err
 }
+
+func (client *fakeInventoryServiceClient) GetReservationByOrderID(
+	context.Context,
+	*inventoryv1.GetReservationByOrderIDRequest,
+	...grpc.CallOption,
+) (*inventoryv1.GetReservationByOrderIDResponse, error) {
+	panic("unexpected GetReservationByOrderID call")
+}

@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InventoryService_ReserveInventory_FullMethodName = "/marketplace.inventory.v1.InventoryService/ReserveInventory"
+	InventoryService_ReserveInventory_FullMethodName        = "/marketplace.inventory.v1.InventoryService/ReserveInventory"
+	InventoryService_GetReservationByOrderID_FullMethodName = "/marketplace.inventory.v1.InventoryService/GetReservationByOrderID"
 )
 
 // InventoryServiceClient is the client API for InventoryService service.
@@ -30,6 +31,8 @@ const (
 type InventoryServiceClient interface {
 	// ReserveInventory idempotently reserves the requested stock for an order.
 	ReserveInventory(ctx context.Context, in *ReserveInventoryRequest, opts ...grpc.CallOption) (*ReserveInventoryResponse, error)
+	// GetReservationByOrderID returns the durable reservation for an order.
+	GetReservationByOrderID(ctx context.Context, in *GetReservationByOrderIDRequest, opts ...grpc.CallOption) (*GetReservationByOrderIDResponse, error)
 }
 
 type inventoryServiceClient struct {
@@ -50,6 +53,16 @@ func (c *inventoryServiceClient) ReserveInventory(ctx context.Context, in *Reser
 	return out, nil
 }
 
+func (c *inventoryServiceClient) GetReservationByOrderID(ctx context.Context, in *GetReservationByOrderIDRequest, opts ...grpc.CallOption) (*GetReservationByOrderIDResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReservationByOrderIDResponse)
+	err := c.cc.Invoke(ctx, InventoryService_GetReservationByOrderID_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InventoryServiceServer is the server API for InventoryService service.
 // All implementations must embed UnimplementedInventoryServiceServer
 // for forward compatibility.
@@ -58,6 +71,8 @@ func (c *inventoryServiceClient) ReserveInventory(ctx context.Context, in *Reser
 type InventoryServiceServer interface {
 	// ReserveInventory idempotently reserves the requested stock for an order.
 	ReserveInventory(context.Context, *ReserveInventoryRequest) (*ReserveInventoryResponse, error)
+	// GetReservationByOrderID returns the durable reservation for an order.
+	GetReservationByOrderID(context.Context, *GetReservationByOrderIDRequest) (*GetReservationByOrderIDResponse, error)
 	mustEmbedUnimplementedInventoryServiceServer()
 }
 
@@ -70,6 +85,9 @@ type UnimplementedInventoryServiceServer struct{}
 
 func (UnimplementedInventoryServiceServer) ReserveInventory(context.Context, *ReserveInventoryRequest) (*ReserveInventoryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReserveInventory not implemented")
+}
+func (UnimplementedInventoryServiceServer) GetReservationByOrderID(context.Context, *GetReservationByOrderIDRequest) (*GetReservationByOrderIDResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetReservationByOrderID not implemented")
 }
 func (UnimplementedInventoryServiceServer) mustEmbedUnimplementedInventoryServiceServer() {}
 func (UnimplementedInventoryServiceServer) testEmbeddedByValue()                          {}
@@ -110,6 +128,24 @@ func _InventoryService_ReserveInventory_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InventoryService_GetReservationByOrderID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReservationByOrderIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InventoryServiceServer).GetReservationByOrderID(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InventoryService_GetReservationByOrderID_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InventoryServiceServer).GetReservationByOrderID(ctx, req.(*GetReservationByOrderIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InventoryService_ServiceDesc is the grpc.ServiceDesc for InventoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -120,6 +156,10 @@ var InventoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReserveInventory",
 			Handler:    _InventoryService_ReserveInventory_Handler,
+		},
+		{
+			MethodName: "GetReservationByOrderID",
+			Handler:    _InventoryService_GetReservationByOrderID_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

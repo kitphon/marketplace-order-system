@@ -30,6 +30,8 @@ const (
 	ReservationStatus_RESERVATION_STATUS_UNSPECIFIED ReservationStatus = 0
 	// RESERVATION_STATUS_RESERVED means the requested stock is reserved.
 	ReservationStatus_RESERVATION_STATUS_RESERVED ReservationStatus = 1
+	// RESERVATION_STATUS_EXPIRED means the reservation is an expired tombstone.
+	ReservationStatus_RESERVATION_STATUS_EXPIRED ReservationStatus = 2
 )
 
 // Enum value maps for ReservationStatus.
@@ -37,10 +39,12 @@ var (
 	ReservationStatus_name = map[int32]string{
 		0: "RESERVATION_STATUS_UNSPECIFIED",
 		1: "RESERVATION_STATUS_RESERVED",
+		2: "RESERVATION_STATUS_EXPIRED",
 	}
 	ReservationStatus_value = map[string]int32{
 		"RESERVATION_STATUS_UNSPECIFIED": 0,
 		"RESERVATION_STATUS_RESERVED":    1,
+		"RESERVATION_STATUS_EXPIRED":     2,
 	}
 )
 
@@ -304,6 +308,128 @@ func (x *ReserveInventoryResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// GetReservationByOrderIDRequest identifies a reservation by its order identity.
+type GetReservationByOrderIDRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderId       string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReservationByOrderIDRequest) Reset() {
+	*x = GetReservationByOrderIDRequest{}
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReservationByOrderIDRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReservationByOrderIDRequest) ProtoMessage() {}
+
+func (x *GetReservationByOrderIDRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReservationByOrderIDRequest.ProtoReflect.Descriptor instead.
+func (*GetReservationByOrderIDRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_inventory_v1_inventory_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetReservationByOrderIDRequest) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+// GetReservationByOrderIDResponse describes persisted Inventory reservation state.
+type GetReservationByOrderIDResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ReservationId string                 `protobuf:"bytes,1,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
+	OrderId       string                 `protobuf:"bytes,2,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	Items         []*ReservationItem     `protobuf:"bytes,3,rep,name=items,proto3" json:"items,omitempty"`
+	Status        ReservationStatus      `protobuf:"varint,4,opt,name=status,proto3,enum=marketplace.inventory.v1.ReservationStatus" json:"status,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReservationByOrderIDResponse) Reset() {
+	*x = GetReservationByOrderIDResponse{}
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReservationByOrderIDResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReservationByOrderIDResponse) ProtoMessage() {}
+
+func (x *GetReservationByOrderIDResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReservationByOrderIDResponse.ProtoReflect.Descriptor instead.
+func (*GetReservationByOrderIDResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_inventory_v1_inventory_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GetReservationByOrderIDResponse) GetReservationId() string {
+	if x != nil {
+		return x.ReservationId
+	}
+	return ""
+}
+
+func (x *GetReservationByOrderIDResponse) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *GetReservationByOrderIDResponse) GetItems() []*ReservationItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+func (x *GetReservationByOrderIDResponse) GetStatus() ReservationStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ReservationStatus_RESERVATION_STATUS_UNSPECIFIED
+}
+
+func (x *GetReservationByOrderIDResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
 // InventoryErrorDetail carries structured business context for rich gRPC status errors.
 type InventoryErrorDetail struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
@@ -316,7 +442,7 @@ type InventoryErrorDetail struct {
 
 func (x *InventoryErrorDetail) Reset() {
 	*x = InventoryErrorDetail{}
-	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[3]
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +454,7 @@ func (x *InventoryErrorDetail) String() string {
 func (*InventoryErrorDetail) ProtoMessage() {}
 
 func (x *InventoryErrorDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[3]
+	mi := &file_marketplace_inventory_v1_inventory_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +467,7 @@ func (x *InventoryErrorDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InventoryErrorDetail.ProtoReflect.Descriptor instead.
 func (*InventoryErrorDetail) Descriptor() ([]byte, []int) {
-	return file_marketplace_inventory_v1_inventory_proto_rawDescGZIP(), []int{3}
+	return file_marketplace_inventory_v1_inventory_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *InventoryErrorDetail) GetReason() InventoryFailureReason {
@@ -376,22 +502,33 @@ const file_marketplace_inventory_v1_inventory_proto_rawDesc = "" +
 	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12C\n" +
 	"\x06status\x18\x02 \x01(\x0e2+.marketplace.inventory.v1.ReservationStatusR\x06status\x129\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x93\x01\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\";\n" +
+	"\x1eGetReservationByOrderIDRequest\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\"\xa4\x02\n" +
+	"\x1fGetReservationByOrderIDResponse\x12%\n" +
+	"\x0ereservation_id\x18\x01 \x01(\tR\rreservationId\x12\x19\n" +
+	"\border_id\x18\x02 \x01(\tR\aorderId\x12?\n" +
+	"\x05items\x18\x03 \x03(\v2).marketplace.inventory.v1.ReservationItemR\x05items\x12C\n" +
+	"\x06status\x18\x04 \x01(\x0e2+.marketplace.inventory.v1.ReservationStatusR\x06status\x129\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x93\x01\n" +
 	"\x14InventoryErrorDetail\x12H\n" +
 	"\x06reason\x18\x01 \x01(\x0e20.marketplace.inventory.v1.InventoryFailureReasonR\x06reason\x12\"\n" +
 	"\n" +
 	"product_id\x18\x02 \x01(\tH\x00R\tproductId\x88\x01\x01B\r\n" +
-	"\v_product_id*X\n" +
+	"\v_product_id*x\n" +
 	"\x11ReservationStatus\x12\"\n" +
 	"\x1eRESERVATION_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
-	"\x1bRESERVATION_STATUS_RESERVED\x10\x01*\xd8\x01\n" +
+	"\x1bRESERVATION_STATUS_RESERVED\x10\x01\x12\x1e\n" +
+	"\x1aRESERVATION_STATUS_EXPIRED\x10\x02*\xd8\x01\n" +
 	"\x16InventoryFailureReason\x12(\n" +
 	"$INVENTORY_FAILURE_REASON_UNSPECIFIED\x10\x00\x12/\n" +
 	"+INVENTORY_FAILURE_REASON_INSUFFICIENT_STOCK\x10\x01\x121\n" +
 	"-INVENTORY_FAILURE_REASON_RESERVATION_CONFLICT\x10\x02\x120\n" +
-	",INVENTORY_FAILURE_REASON_RESERVATION_EXPIRED\x10\x032\x8d\x01\n" +
+	",INVENTORY_FAILURE_REASON_RESERVATION_EXPIRED\x10\x032\x9e\x02\n" +
 	"\x10InventoryService\x12y\n" +
-	"\x10ReserveInventory\x121.marketplace.inventory.v1.ReserveInventoryRequest\x1a2.marketplace.inventory.v1.ReserveInventoryResponseBPZNgithub.com/kitphon/marketplace-order-system/contracts/inventory/v1;inventoryv1b\x06proto3"
+	"\x10ReserveInventory\x121.marketplace.inventory.v1.ReserveInventoryRequest\x1a2.marketplace.inventory.v1.ReserveInventoryResponse\x12\x8e\x01\n" +
+	"\x17GetReservationByOrderID\x128.marketplace.inventory.v1.GetReservationByOrderIDRequest\x1a9.marketplace.inventory.v1.GetReservationByOrderIDResponseBPZNgithub.com/kitphon/marketplace-order-system/contracts/inventory/v1;inventoryv1b\x06proto3"
 
 var (
 	file_marketplace_inventory_v1_inventory_proto_rawDescOnce sync.Once
@@ -406,29 +543,36 @@ func file_marketplace_inventory_v1_inventory_proto_rawDescGZIP() []byte {
 }
 
 var file_marketplace_inventory_v1_inventory_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_marketplace_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_marketplace_inventory_v1_inventory_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_marketplace_inventory_v1_inventory_proto_goTypes = []any{
-	(ReservationStatus)(0),           // 0: marketplace.inventory.v1.ReservationStatus
-	(InventoryFailureReason)(0),      // 1: marketplace.inventory.v1.InventoryFailureReason
-	(*ReserveInventoryRequest)(nil),  // 2: marketplace.inventory.v1.ReserveInventoryRequest
-	(*ReservationItem)(nil),          // 3: marketplace.inventory.v1.ReservationItem
-	(*ReserveInventoryResponse)(nil), // 4: marketplace.inventory.v1.ReserveInventoryResponse
-	(*InventoryErrorDetail)(nil),     // 5: marketplace.inventory.v1.InventoryErrorDetail
-	(*timestamppb.Timestamp)(nil),    // 6: google.protobuf.Timestamp
+	(ReservationStatus)(0),                  // 0: marketplace.inventory.v1.ReservationStatus
+	(InventoryFailureReason)(0),             // 1: marketplace.inventory.v1.InventoryFailureReason
+	(*ReserveInventoryRequest)(nil),         // 2: marketplace.inventory.v1.ReserveInventoryRequest
+	(*ReservationItem)(nil),                 // 3: marketplace.inventory.v1.ReservationItem
+	(*ReserveInventoryResponse)(nil),        // 4: marketplace.inventory.v1.ReserveInventoryResponse
+	(*GetReservationByOrderIDRequest)(nil),  // 5: marketplace.inventory.v1.GetReservationByOrderIDRequest
+	(*GetReservationByOrderIDResponse)(nil), // 6: marketplace.inventory.v1.GetReservationByOrderIDResponse
+	(*InventoryErrorDetail)(nil),            // 7: marketplace.inventory.v1.InventoryErrorDetail
+	(*timestamppb.Timestamp)(nil),           // 8: google.protobuf.Timestamp
 }
 var file_marketplace_inventory_v1_inventory_proto_depIdxs = []int32{
-	3, // 0: marketplace.inventory.v1.ReserveInventoryRequest.items:type_name -> marketplace.inventory.v1.ReservationItem
-	6, // 1: marketplace.inventory.v1.ReserveInventoryRequest.expires_at:type_name -> google.protobuf.Timestamp
-	0, // 2: marketplace.inventory.v1.ReserveInventoryResponse.status:type_name -> marketplace.inventory.v1.ReservationStatus
-	6, // 3: marketplace.inventory.v1.ReserveInventoryResponse.expires_at:type_name -> google.protobuf.Timestamp
-	1, // 4: marketplace.inventory.v1.InventoryErrorDetail.reason:type_name -> marketplace.inventory.v1.InventoryFailureReason
-	2, // 5: marketplace.inventory.v1.InventoryService.ReserveInventory:input_type -> marketplace.inventory.v1.ReserveInventoryRequest
-	4, // 6: marketplace.inventory.v1.InventoryService.ReserveInventory:output_type -> marketplace.inventory.v1.ReserveInventoryResponse
-	6, // [6:7] is the sub-list for method output_type
-	5, // [5:6] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	3,  // 0: marketplace.inventory.v1.ReserveInventoryRequest.items:type_name -> marketplace.inventory.v1.ReservationItem
+	8,  // 1: marketplace.inventory.v1.ReserveInventoryRequest.expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 2: marketplace.inventory.v1.ReserveInventoryResponse.status:type_name -> marketplace.inventory.v1.ReservationStatus
+	8,  // 3: marketplace.inventory.v1.ReserveInventoryResponse.expires_at:type_name -> google.protobuf.Timestamp
+	3,  // 4: marketplace.inventory.v1.GetReservationByOrderIDResponse.items:type_name -> marketplace.inventory.v1.ReservationItem
+	0,  // 5: marketplace.inventory.v1.GetReservationByOrderIDResponse.status:type_name -> marketplace.inventory.v1.ReservationStatus
+	8,  // 6: marketplace.inventory.v1.GetReservationByOrderIDResponse.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 7: marketplace.inventory.v1.InventoryErrorDetail.reason:type_name -> marketplace.inventory.v1.InventoryFailureReason
+	2,  // 8: marketplace.inventory.v1.InventoryService.ReserveInventory:input_type -> marketplace.inventory.v1.ReserveInventoryRequest
+	5,  // 9: marketplace.inventory.v1.InventoryService.GetReservationByOrderID:input_type -> marketplace.inventory.v1.GetReservationByOrderIDRequest
+	4,  // 10: marketplace.inventory.v1.InventoryService.ReserveInventory:output_type -> marketplace.inventory.v1.ReserveInventoryResponse
+	6,  // 11: marketplace.inventory.v1.InventoryService.GetReservationByOrderID:output_type -> marketplace.inventory.v1.GetReservationByOrderIDResponse
+	10, // [10:12] is the sub-list for method output_type
+	8,  // [8:10] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_marketplace_inventory_v1_inventory_proto_init() }
@@ -436,14 +580,14 @@ func file_marketplace_inventory_v1_inventory_proto_init() {
 	if File_marketplace_inventory_v1_inventory_proto != nil {
 		return
 	}
-	file_marketplace_inventory_v1_inventory_proto_msgTypes[3].OneofWrappers = []any{}
+	file_marketplace_inventory_v1_inventory_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_marketplace_inventory_v1_inventory_proto_rawDesc), len(file_marketplace_inventory_v1_inventory_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

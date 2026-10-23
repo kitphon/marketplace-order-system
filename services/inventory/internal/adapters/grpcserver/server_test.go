@@ -127,7 +127,7 @@ func TestReserveInventoryUnknownErrorHasNoBusinessDetail(t *testing.T) {
 		failingRepository{err: errors.New("storage unavailable")},
 		clock,
 		&sequenceIDs{},
-	))
+	), application.NewGetReservationByOrderID(failingRepository{err: errors.New("storage unavailable")}))
 	_, err := server.ReserveInventory(context.Background(), request(
 		"order-001",
 		clock.Now().Add(time.Hour),
@@ -158,7 +158,7 @@ func TestReserveInventoryMapsRepositoryContextErrorsWithoutBusinessDetail(t *tes
 				failingRepository{err: test.err},
 				clock,
 				&sequenceIDs{},
-			))
+			), application.NewGetReservationByOrderID(failingRepository{err: test.err}))
 			_, err := server.ReserveInventory(context.Background(), request(
 				"order-001",
 				clock.Now().Add(time.Hour),
@@ -170,6 +170,85 @@ func TestReserveInventoryMapsRepositoryContextErrorsWithoutBusinessDetail(t *tes
 			}
 			if details := gotStatus.Details(); len(details) != 0 {
 				t.Fatalf("details = %v, want none", details)
+			}
+		})
+	}
+}
+
+func TestGetReservationByOrderIDMapsReservedResponseAndIsReadOnly(t *testing.T) {
+	harness := newGRPCHarness(t, map[string]int{"product-001": 10, "product-002": 10})
+	expiresAt := harness.clock.Now().Add(time.Hour)
+	reserved, err := harness.client.ReserveInventory(context.Background(), request(
+		"order-001",
+		expiresAt,
+		&inventoryv1.ReservationItem{ProductId: "product-002", Quantity: 3},
+		&inventoryv1.ReservationItem{ProductId: "product-001", Quantity: 2},
+	))
+	if err != nil {
+		t.Fatalf("ReserveInventory() error = %v", err)
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		response, err := harness.client.GetReservationByOrderID(context.Background(), &inventoryv1.GetReservationByOrderIDRequest{OrderId: "order-001"})
+		if err != nil {
+			t.Fatalf("GetReservationByOrderID() attempt %d error = %v", attempt+1, err)
+		}
+		if response.ReservationId != reserved.ReservationId || response.OrderId != "order-001" ||
+			response.Status != inventoryv1.ReservationStatus_RESERVATION_STATUS_RESERVED ||
+			!response.ExpiresAt.AsTime().Equal(expiresAt) {
+			t.Fatalf("response = %+v", response)
+		}
+		if len(response.Items) != 2 || response.Items[0].ProductId != "product-001" ||
+			response.Items[0].Quantity != 2 || response.Items[1].ProductId != "product-002" ||
+			response.Items[1].Quantity != 3 {
+			t.Fatalf("canonical items = %+v", response.Items)
+		}
+	}
+	if got := harness.repository.Available("product-001"); got != 8 {
+		t.Fatalf("product-001 available = %d, want 8", got)
+	}
+	if got := harness.repository.Available("product-002"); got != 7 {
+		t.Fatalf("product-002 available = %d, want 7", got)
+	}
+}
+
+func TestGetReservationByOrderIDMapsExpiredResponse(t *testing.T) {
+	harness := newGRPCHarness(t, map[string]int{"product-001": 10})
+	expiresAt := harness.clock.Now().Add(time.Hour)
+	if _, err := harness.client.ReserveInventory(context.Background(), request(
+		"order-001", expiresAt, &inventoryv1.ReservationItem{ProductId: "product-001", Quantity: 2},
+	)); err != nil {
+		t.Fatalf("ReserveInventory() error = %v", err)
+	}
+	harness.clock.Set(expiresAt)
+	if count, err := application.NewExpireReservations(harness.repository, harness.clock).Execute(context.Background()); err != nil || count != 1 {
+		t.Fatalf("ExpireReservations.Execute() = (%d, %v), want (1, nil)", count, err)
+	}
+	response, err := harness.client.GetReservationByOrderID(context.Background(), &inventoryv1.GetReservationByOrderIDRequest{OrderId: "order-001"})
+	if err != nil {
+		t.Fatalf("GetReservationByOrderID() error = %v", err)
+	}
+	if response.Status != inventoryv1.ReservationStatus_RESERVATION_STATUS_EXPIRED ||
+		!response.ExpiresAt.AsTime().Equal(expiresAt) {
+		t.Fatalf("response = %+v, want EXPIRED with original expiry", response)
+	}
+}
+
+func TestGetReservationByOrderIDErrorCodes(t *testing.T) {
+	harness := newGRPCHarness(t, nil)
+	for _, test := range []struct {
+		name    string
+		request *inventoryv1.GetReservationByOrderIDRequest
+		code    codes.Code
+	}{
+		{name: "nil", request: nil, code: codes.InvalidArgument},
+		{name: "blank", request: &inventoryv1.GetReservationByOrderIDRequest{OrderId: " \t"}, code: codes.InvalidArgument},
+		{name: "missing", request: &inventoryv1.GetReservationByOrderIDRequest{OrderId: "missing"}, code: codes.NotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := harness.client.GetReservationByOrderID(context.Background(), test.request)
+			if status.Code(err) != test.code {
+				t.Fatalf("code = %v, want %v; error=%v", status.Code(err), test.code, err)
 			}
 		})
 	}
@@ -216,8 +295,9 @@ func assertInventoryError(
 }
 
 type grpcHarness struct {
-	client inventoryv1.InventoryServiceClient
-	clock  *testClock
+	client     inventoryv1.InventoryServiceClient
+	clock      *testClock
+	repository *memory.InventoryRepository
 }
 
 func newGRPCHarness(t *testing.T, quantities map[string]int) grpcHarness {
@@ -233,10 +313,11 @@ func newGRPCHarness(t *testing.T, quantities map[string]int) grpcHarness {
 	repository := memory.NewInventoryRepository(stock)
 	clock := &testClock{now: time.Date(2026, time.October, 6, 9, 0, 0, 0, time.UTC)}
 	useCase := application.NewReserveInventory(repository, clock, &sequenceIDs{})
+	getReservation := application.NewGetReservationByOrderID(repository)
 
 	listener := bufconn.Listen(1 << 20)
 	server := grpc.NewServer()
-	inventoryv1.RegisterInventoryServiceServer(server, grpcserver.New(useCase))
+	inventoryv1.RegisterInventoryServiceServer(server, grpcserver.New(useCase, getReservation))
 	go func() {
 		_ = server.Serve(listener)
 	}()
@@ -252,7 +333,11 @@ func newGRPCHarness(t *testing.T, quantities map[string]int) grpcHarness {
 		t.Fatalf("grpc.NewClient() error = %v", err)
 	}
 	t.Cleanup(func() { _ = connection.Close() })
-	return grpcHarness{client: inventoryv1.NewInventoryServiceClient(connection), clock: clock}
+	return grpcHarness{
+		client:     inventoryv1.NewInventoryServiceClient(connection),
+		clock:      clock,
+		repository: repository,
+	}
 }
 
 type testClock struct {
@@ -281,6 +366,10 @@ func (ids *sequenceIDs) NewID() (string, error) {
 type failingRepository struct{ err error }
 
 func (repository failingRepository) Reserve(context.Context, ports.ReserveRequest) (*domain.Reservation, error) {
+	return nil, repository.err
+}
+
+func (repository failingRepository) FindReservationByOrderID(context.Context, string) (*domain.Reservation, error) {
 	return nil, repository.err
 }
 

@@ -79,6 +79,25 @@ func (repository *InventoryRepository) Reserve(
 	return reservation.Clone(), nil
 }
 
+func (repository *InventoryRepository) FindReservationByOrderID(
+	ctx context.Context,
+	orderID string,
+) (*domain.Reservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reservation, exists := repository.reservations[orderID]
+	if !exists {
+		return nil, ports.ErrReservationNotFound
+	}
+	return reservation.Clone(), nil
+}
+
 func (repository *InventoryRepository) ExpireReservations(
 	ctx context.Context,
 	now time.Time,

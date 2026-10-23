@@ -109,8 +109,9 @@ func run(ctx context.Context) error {
 
 	clock := system.Clock{}
 	reserve := application.NewReserveInventory(repository, clock, system.IDGenerator{})
+	getReservation := application.NewGetReservationByOrderID(repository)
 	expire := application.NewExpireReservations(repository, clock)
-	service := grpcserver.New(reserve)
+	service := grpcserver.New(reserve, getReservation)
 	grpcServer := grpc.NewServer()
 	inventoryv1.RegisterInventoryServiceServer(grpcServer, service)
 	healthServer := health.NewServer()

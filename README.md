@@ -16,8 +16,9 @@ introduced only after reproducing the failure that motivates it.
 - [M5C — Order-side gRPC integration](docs/milestones/M5C-order-grpc-integration.md)
 - [M5D1 — Inventory MongoDB repository](docs/milestones/M5D1-inventory-mongodb-repository.md)
 - [M5D2 — Inventory MongoDB runtime](docs/milestones/M5D2-inventory-mongodb-runtime.md)
+- [M6A — Inventory reservation lookup](docs/milestones/M6A-inventory-reservation-lookup.md)
 
-## Current runnable milestone: M5 — gRPC service boundaries
+## Current runnable milestone: M6A — authoritative Inventory lookup
 
 The Order Service now calls the standalone Product and Inventory services
 through versioned gRPC adapters. MongoDB persists both Order aggregates and
@@ -57,9 +58,12 @@ Implemented:
 - Reproducible real-process M5 integration and smoke tests
 - Durable transactional MongoDB Inventory repository and runtime wiring
 - Restart-safe Inventory idempotency, stock, expiration, and seed-if-absent state
+- Retry-safe `GetReservationByOrderID` lookup for durable `RESERVED` and `EXPIRED` reservations
+- Complete reservation identity, canonical items, status, and original expiry over Inventory gRPC
 
 Not implemented yet:
 
+- Order-side stale-`PENDING` reconciliation
 - Kafka, transactional outbox, and inbox
 - Redis concurrency controls
 - Observability and load testing
@@ -126,7 +130,9 @@ Product listens on `:50051`, Inventory on `:50052`, and Order on `:8080` by
 default. Local gRPC transport is plaintext; production TLS or mTLS is deferred.
 See the [M5C milestone](docs/milestones/M5C-order-grpc-integration.md) for retry
 configuration and the [M5D2 milestone](docs/milestones/M5D2-inventory-mongodb-runtime.md)
-for Inventory persistence configuration and lifecycle behavior.
+for Inventory persistence configuration and lifecycle behavior. See
+[M6A](docs/milestones/M6A-inventory-reservation-lookup.md) for lookup semantics
+and the deferred Order reconciliation work.
 
 Create an order:
 

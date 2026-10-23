@@ -181,6 +181,37 @@ func (repository *InventoryRepository) Reserve(
 	}
 }
 
+func (repository *InventoryRepository) FindReservationByOrderID(
+	ctx context.Context,
+	orderID string,
+) (*domain.Reservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var document reservationDocument
+	err := repository.reservations.FindOne(
+		ctx,
+		bson.D{{Key: "order_id", Value: orderID}},
+	).Decode(&document)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ports.ErrReservationNotFound
+	}
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return nil, contextErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		return nil, repositoryFailure("find reservation by order id", err)
+	}
+	reservation, err := document.toReservation()
+	if err != nil {
+		return nil, fmt.Errorf("find reservation by order id: %w", err)
+	}
+	return reservation.Clone(), nil
+}
+
 type reserveOutcome int
 
 const (

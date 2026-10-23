@@ -3,6 +3,7 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"sort"
 
 	inventoryv1 "github.com/kitphon/marketplace-order-system/contracts/inventory/v1"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/application"
@@ -15,11 +16,65 @@ import (
 
 type Server struct {
 	inventoryv1.UnimplementedInventoryServiceServer
-	reserveInventory *application.ReserveInventory
+	reserveInventory        *application.ReserveInventory
+	getReservationByOrderID *application.GetReservationByOrderID
 }
 
-func New(reserveInventory *application.ReserveInventory) *Server {
-	return &Server{reserveInventory: reserveInventory}
+func New(
+	reserveInventory *application.ReserveInventory,
+	getReservationByOrderID *application.GetReservationByOrderID,
+) *Server {
+	return &Server{
+		reserveInventory:        reserveInventory,
+		getReservationByOrderID: getReservationByOrderID,
+	}
+}
+
+func (server *Server) GetReservationByOrderID(
+	ctx context.Context,
+	request *inventoryv1.GetReservationByOrderIDRequest,
+) (*inventoryv1.GetReservationByOrderIDResponse, error) {
+	if request == nil {
+		return nil, status.Error(codes.InvalidArgument, "order id is required")
+	}
+	reservation, err := server.getReservationByOrderID.Execute(ctx, request.OrderId)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	protoStatus, err := reservationStatus(reservation.Status())
+	if err != nil {
+		return nil, err
+	}
+	items := reservation.Items()
+	sort.Slice(items, func(left, right int) bool {
+		return items[left].ProductID() < items[right].ProductID()
+	})
+	responseItems := make([]*inventoryv1.ReservationItem, len(items))
+	for index, item := range items {
+		responseItems[index] = &inventoryv1.ReservationItem{
+			ProductId: item.ProductID(),
+			Quantity:  int32(item.Quantity()),
+		}
+	}
+	return &inventoryv1.GetReservationByOrderIDResponse{
+		ReservationId: reservation.ID(),
+		OrderId:       reservation.OrderID(),
+		Items:         responseItems,
+		Status:        protoStatus,
+		ExpiresAt:     timestamppb.New(reservation.ExpiresAt()),
+	}, nil
+}
+
+func reservationStatus(value domain.ReservationStatus) (inventoryv1.ReservationStatus, error) {
+	switch value {
+	case domain.ReservationStatusReserved:
+		return inventoryv1.ReservationStatus_RESERVATION_STATUS_RESERVED, nil
+	case domain.ReservationStatusExpired:
+		return inventoryv1.ReservationStatus_RESERVATION_STATUS_EXPIRED, nil
+	default:
+		return inventoryv1.ReservationStatus_RESERVATION_STATUS_UNSPECIFIED,
+			status.Error(codes.Internal, "inventory reservation has an unknown status")
+	}
 }
 
 func (server *Server) ReserveInventory(
@@ -74,6 +129,10 @@ func mapError(err error) error {
 		return status.FromContextError(err).Err()
 	case errors.Is(err, application.ErrInvalidReserveInventoryRequest):
 		return status.Error(codes.InvalidArgument, "inventory reservation request is invalid")
+	case errors.Is(err, application.ErrInvalidGetReservationRequest):
+		return status.Error(codes.InvalidArgument, "order id is required")
+	case errors.Is(err, ports.ErrReservationNotFound):
+		return status.Error(codes.NotFound, "inventory reservation was not found")
 	case errors.Is(err, ports.ErrInsufficientStock):
 		var stockError *ports.InsufficientStockError
 		var productID string

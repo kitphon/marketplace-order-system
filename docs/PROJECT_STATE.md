@@ -1,6 +1,6 @@
 # Project state
 
-Last verified: 2026-10-18
+Last verified: 2026-10-23
 
 ## Goal
 
@@ -17,6 +17,7 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - **M5C — Order gRPC integration:** Order-side Product and Inventory adapters, structured error mapping, bounded context-aware retries, currency propagation, and long-lived runtime connections. M5 service boundaries are complete.
 - **M5D1 — Inventory MongoDB repository:** Durable stock and reservation documents, transactional idempotent reservations, versioned expiration with exactly-once stock restoration, seed-if-absent behavior, and real replica-set integration tests. Runtime wiring was delivered in M5D2.
 - **M5D2 — Inventory MongoDB runtime:** Runnable Inventory composition root backed only by the durable repository, fail-fast MongoDB initialization, index and insert-only stock setup, bounded lifecycle management, isolated service databases, and restart persistence verification. M5D is complete.
+- **M6A — Inventory reservation lookup:** Versioned `GetReservationByOrderID` contract, durable repository lookup, focused application query, explicit gRPC status mapping, and restart-safe black-box coverage. Inventory now exposes authoritative `RESERVED`, `EXPIRED`, and not-found outcomes without mutating stock or reservations.
 
 ## Current architecture
 
@@ -31,6 +32,7 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - The Order composition root owns two long-lived gRPC connections and closes them during shutdown. Product and Inventory do not participate in Order health endpoints.
 - The M5 black-box suite builds all three service binaries, connects over real TCP, and uses an isolated MongoDB 8.0 replica set per run.
 - The Inventory composition root owns one long-lived MongoDB client and uses one repository instance for reservation and expiration. Order and Inventory use separate service-owned databases.
+- Inventory exposes a read-only lookup by `order_id`; its response includes reservation identity, canonical items, persisted status, and original expiry for future Order intent comparison.
 
 ## Decisions and invariants
 
@@ -52,10 +54,11 @@ Build a production-oriented marketplace order-processing backend in Go, one mile
 - Full-stack tests use unique Compose project and volume names, separate unique Order and Inventory databases, and remove only their own resources after success, failure, interruption, or timeout.
 - Durable Inventory reservations use snapshot/primary/majority multi-document transactions. Conditional stock decrements prevent negative availability, while versioned reservation transitions ensure stock is restored once across concurrent expiration workers.
 - Inventory stock seeding is insert-only: concurrent `$setOnInsert` upserts never reset existing availability or versions.
+- A missing Inventory reservation is gRPC `NotFound`, not a reservation status. Lookup reports persisted status and never renews an elapsed `RESERVED` reservation; the expiration worker owns the durable transition.
 
 ## Known reliability gap
 
-Create Order persists `PENDING` before reserving Inventory. If Inventory reserves stock but its result is ambiguous, or Order Service cannot persist `INVENTORY_RESERVED`, the order can remain `PENDING`. M5C adds bounded transport retries using Inventory's `order_id` idempotency identity, but it intentionally does not add stale-`PENDING` reconciliation.
+Create Order persists `PENDING` before reserving Inventory. If Inventory reserves stock but its result is ambiguous, or Order Service cannot persist `INVENTORY_RESERVED`, the order can remain `PENDING`. M6A provides the authoritative Inventory lookup needed to resolve that ambiguity, but the Order-side adapter, reconciliation fields, and worker remain deferred.
 
 ## Explicitly deferred
 
@@ -63,13 +66,13 @@ Create Order persists `PENDING` before reserving Inventory. If Inventory reserve
 - Kafka domain events
 - Transactional outbox and consumer inbox patterns
 - Redis-based concurrency controls
-- Stale-`PENDING` reconciliation beyond bounded adapter retries
+- Order-side Inventory lookup adapter and stale-`PENDING` reconciliation
 - Production gRPC TLS or mTLS
 - Production observability and load testing
 
 ## Next milestone
 
-M5D is complete. M6 should address ambiguous Inventory outcomes and stale-`PENDING` reconciliation before asynchronous messaging.
+M6A is complete. M6B and M6C should add Order-side lookup/reconciliation state and the reconciliation worker before asynchronous messaging.
 
 ## Last verification
 
@@ -130,4 +133,15 @@ M5D2 runtime verification on 2026-10-18 with Go 1.27.1 against `go 1.25.0` direc
 - `make integration` — passed all existing black-box scenarios plus persisted Inventory document, index, idempotency, conflict, fail-fast startup, and restart-survival checks.
 - `make smoke` — passed the real-process happy path and idempotent retry against durable Inventory storage.
 - `make verify-all` — passed; it reran the fast verification and then integration, Inventory restart, and smoke groups in one isolated stack lifecycle.
+- `git diff --check` — passed.
+
+M6A verification on 2026-10-23:
+
+- `gofmt -w` on all changed Go files and `go work sync` — passed.
+- `make proto-format`, `make proto-lint`, and `make proto-generate` — passed; generated Inventory v1 Go and gRPC contracts were committed.
+- `make vet`, `make test`, and `make test-race` — passed across all four Go modules.
+- Build-tagged Inventory MongoDB integration tests — passed against an isolated MongoDB 8.0 replica set.
+- `make integration` — passed the real-process contract, Create Order, lookup retry-safety, missing lookup, Inventory restart, and persistence scenarios.
+- `make smoke` — passed the existing real-process Create Order happy path and idempotent retry.
+- `make verify-all` — passed fast verification followed by integration, Inventory restart lookup, and smoke groups in one isolated stack lifecycle.
 - `git diff --check` — passed.

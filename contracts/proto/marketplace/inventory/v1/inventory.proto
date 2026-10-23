@@ -10,6 +10,8 @@ option go_package = "github.com/kitphon/marketplace-order-system/contracts/inven
 service InventoryService {
   // ReserveInventory idempotently reserves the requested stock for an order.
   rpc ReserveInventory(ReserveInventoryRequest) returns (ReserveInventoryResponse);
+  // GetReservationByOrderID returns the durable reservation for an order.
+  rpc GetReservationByOrderID(GetReservationByOrderIDRequest) returns (GetReservationByOrderIDResponse);
 }
 
 // ReservationStatus describes the outcome represented by a reservation response.
@@ -18,6 +20,8 @@ enum ReservationStatus {
   RESERVATION_STATUS_UNSPECIFIED = 0;
   // RESERVATION_STATUS_RESERVED means the requested stock is reserved.
   RESERVATION_STATUS_RESERVED = 1;
+  // RESERVATION_STATUS_EXPIRED means the reservation is an expired tombstone.
+  RESERVATION_STATUS_EXPIRED = 2;
 }
 
 // InventoryFailureReason is a machine-readable reason for an Inventory RPC failure.
@@ -51,6 +55,20 @@ message ReserveInventoryResponse {
   string reservation_id = 1;
   ReservationStatus status = 2;
   google.protobuf.Timestamp expires_at = 3;
+}
+
+// GetReservationByOrderIDRequest identifies a reservation by its order identity.
+message GetReservationByOrderIDRequest {
+  string order_id = 1;
+}
+
+// GetReservationByOrderIDResponse describes persisted Inventory reservation state.
+message GetReservationByOrderIDResponse {
+  string reservation_id = 1;
+  string order_id = 2;
+  repeated ReservationItem items = 3;
+  ReservationStatus status = 4;
+  google.protobuf.Timestamp expires_at = 5;
 }
 
 // InventoryErrorDetail carries structured business context for rich gRPC status errors.

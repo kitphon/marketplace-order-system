@@ -98,6 +98,15 @@ func TestIntegration(t *testing.T) {
 		if !first.ExpiresAt.AsTime().Equal(expiresAt) || !second.ExpiresAt.AsTime().Equal(expiresAt) {
 			t.Fatalf("expirations = (%v, %v), want %v", first.ExpiresAt, second.ExpiresAt, expiresAt)
 		}
+		lookup, err := client.GetReservationByOrderID(ctx, &inventoryv1.GetReservationByOrderIDRequest{OrderId: request.OrderId})
+		if err != nil {
+			t.Fatalf("GetReservationByOrderID() error = %v", err)
+		}
+		assertReservationLookup(t, lookup, first.ReservationId, request.OrderId, request.Items, expiresAt)
+		_, err = client.GetReservationByOrderID(ctx, &inventoryv1.GetReservationByOrderIDRequest{OrderId: uniqueID(configuration, "missing-inventory")})
+		if status.Code(err) != codes.NotFound {
+			t.Fatalf("missing lookup code = %v, want NotFound; error=%v", status.Code(err), err)
+		}
 
 		conflict := &inventoryv1.ReserveInventoryRequest{
 			OrderId: request.OrderId,
@@ -211,6 +220,17 @@ func TestInventoryRuntimePersistenceBeforeRestart(t *testing.T) {
 	if afterFirst.Available != before.Available-2 || afterFirst.Version != before.Version+1 {
 		t.Fatalf("stock after first reservation = %+v, before = %+v", afterFirst, before)
 	}
+	for attempt := 0; attempt < 2; attempt++ {
+		lookup, lookupErr := client.GetReservationByOrderID(ctx, &inventoryv1.GetReservationByOrderIDRequest{OrderId: request.OrderId})
+		if lookupErr != nil {
+			t.Fatalf("runtime lookup attempt %d error = %v", attempt+1, lookupErr)
+		}
+		assertReservationLookup(t, lookup, first.ReservationId, request.OrderId, request.Items, request.ExpiresAt.AsTime())
+	}
+	assertInventoryStock(t, database, "product-002", afterFirst)
+	if afterLookup := loadInventoryReservation(t, database, request.OrderId); !reflect.DeepEqual(afterLookup, persisted) {
+		t.Fatalf("reservation changed after lookup: before=%+v after=%+v", persisted, afterLookup)
+	}
 
 	second, err := client.ReserveInventory(ctx, request)
 	if err != nil {
@@ -251,6 +271,22 @@ func TestInventoryRuntimePersistenceAfterRestart(t *testing.T) {
 	if stockBeforeRetry.Available == 100 {
 		t.Fatal("Inventory startup seed reset product-002 stock to 100")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := inventoryClient(t, configuration)
+	lookup, err := client.GetReservationByOrderID(ctx, &inventoryv1.GetReservationByOrderIDRequest{OrderId: persisted.OrderID})
+	if err != nil {
+		t.Fatalf("post-restart GetReservationByOrderID() error = %v", err)
+	}
+	wantItems := make([]*inventoryv1.ReservationItem, len(persisted.Items))
+	for index, item := range persisted.Items {
+		wantItems[index] = &inventoryv1.ReservationItem{ProductId: item.ProductID, Quantity: int32(item.Quantity)}
+	}
+	assertReservationLookup(t, lookup, persisted.ID, persisted.OrderID, wantItems, persisted.ExpiresAt)
+	assertInventoryStock(t, database, "product-002", stockBeforeRetry)
+	if afterLookup := loadInventoryReservation(t, database, persisted.OrderID); !reflect.DeepEqual(afterLookup, persisted) {
+		t.Fatalf("persisted reservation changed after restart lookup: before=%+v after=%+v", persisted, afterLookup)
+	}
 
 	request := &inventoryv1.ReserveInventoryRequest{
 		OrderId: persisted.OrderID,
@@ -260,9 +296,7 @@ func TestInventoryRuntimePersistenceAfterRestart(t *testing.T) {
 		}},
 		ExpiresAt: timestamppb.New(time.Now().UTC().Add(time.Hour)),
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	response, err := inventoryClient(t, configuration).ReserveInventory(ctx, request)
+	response, err := client.ReserveInventory(ctx, request)
 	if err != nil {
 		t.Fatalf("post-restart ReserveInventory() error = %v", err)
 	}
@@ -271,6 +305,31 @@ func TestInventoryRuntimePersistenceAfterRestart(t *testing.T) {
 	}
 	assertInventoryStock(t, database, "product-002", stockBeforeRetry)
 	assertInventoryReservationCount(t, database, persisted.OrderID, 1)
+}
+
+func assertReservationLookup(
+	t *testing.T,
+	response *inventoryv1.GetReservationByOrderIDResponse,
+	reservationID string,
+	orderID string,
+	items []*inventoryv1.ReservationItem,
+	expiresAt time.Time,
+) {
+	t.Helper()
+	if response.ReservationId != reservationID || response.OrderId != orderID ||
+		response.Status != inventoryv1.ReservationStatus_RESERVATION_STATUS_RESERVED ||
+		response.ExpiresAt == nil || !response.ExpiresAt.AsTime().Equal(expiresAt) {
+		t.Fatalf("lookup response = %+v, want reservation=%q order=%q expiry=%v", response, reservationID, orderID, expiresAt)
+	}
+	if len(response.Items) != len(items) {
+		t.Fatalf("lookup item count = %d, want %d", len(response.Items), len(items))
+	}
+	for index := range items {
+		if response.Items[index].ProductId != items[index].ProductId ||
+			response.Items[index].Quantity != items[index].Quantity {
+			t.Fatalf("lookup items = %+v, want %+v", response.Items, items)
+		}
+	}
 }
 
 func TestInventoryStartupFailsWithoutMongoDB(t *testing.T) {

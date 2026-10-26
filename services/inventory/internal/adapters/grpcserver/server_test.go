@@ -254,6 +254,17 @@ func TestGetReservationByOrderIDErrorCodes(t *testing.T) {
 	}
 }
 
+func TestGetReservationByOrderIDNilRepositoryResultIsInternal(t *testing.T) {
+	server := grpcserver.New(nil, application.NewGetReservationByOrderID(failingRepository{}))
+	response, err := server.GetReservationByOrderID(
+		context.Background(),
+		&inventoryv1.GetReservationByOrderIDRequest{OrderId: "order-001"},
+	)
+	if response != nil || status.Code(err) != codes.Internal {
+		t.Fatalf("GetReservationByOrderID() = (%+v, %v), want (nil, Internal)", response, err)
+	}
+}
+
 func request(
 	orderID string,
 	expiresAt time.Time,

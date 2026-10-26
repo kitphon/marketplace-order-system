@@ -19,7 +19,9 @@ A missing reservation returns gRPC `NotFound`. It is not a reservation status
 because no reservation resource exists. Blank order IDs return `InvalidArgument`,
 while storage failures and corrupt or unknown persisted state return `Internal`.
 `UNSPECIFIED` is retained as protobuf zero for compatibility but is never emitted
-in a successful response.
+in a successful response. Before mapping, the gRPC adapter also rejects nil or
+malformed reservations, duplicate or non-representable items, and expiries outside
+the Protobuf Timestamp range, so it cannot return a partial malformed response.
 
 ## Persisted status and expiry
 

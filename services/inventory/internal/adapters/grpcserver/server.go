@@ -3,7 +3,9 @@ package grpcserver
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
+	"strings"
 
 	inventoryv1 "github.com/kitphon/marketplace-order-system/contracts/inventory/v1"
 	"github.com/kitphon/marketplace-order-system/services/inventory/internal/application"
@@ -41,11 +43,36 @@ func (server *Server) GetReservationByOrderID(
 	if err != nil {
 		return nil, mapError(err)
 	}
+	return reservationResponse(reservation)
+}
+
+func reservationResponse(reservation *domain.Reservation) (*inventoryv1.GetReservationByOrderIDResponse, error) {
+	if reservation == nil {
+		return nil, status.Error(codes.Internal, "inventory reservation is missing")
+	}
+	if strings.TrimSpace(reservation.ID()) == "" || strings.TrimSpace(reservation.OrderID()) == "" {
+		return nil, status.Error(codes.Internal, "inventory reservation identity is invalid")
+	}
 	protoStatus, err := reservationStatus(reservation.Status())
 	if err != nil {
 		return nil, err
 	}
 	items := reservation.Items()
+	if len(items) == 0 {
+		return nil, status.Error(codes.Internal, "inventory reservation items are missing")
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ProductID()) == "" ||
+			item.Quantity() <= 0 ||
+			item.Quantity() > math.MaxInt32 {
+			return nil, status.Error(codes.Internal, "inventory reservation item is invalid")
+		}
+		if _, exists := seen[item.ProductID()]; exists {
+			return nil, status.Error(codes.Internal, "inventory reservation contains duplicate products")
+		}
+		seen[item.ProductID()] = struct{}{}
+	}
 	sort.Slice(items, func(left, right int) bool {
 		return items[left].ProductID() < items[right].ProductID()
 	})
@@ -56,12 +83,16 @@ func (server *Server) GetReservationByOrderID(
 			Quantity:  int32(item.Quantity()),
 		}
 	}
+	expiresAt := timestamppb.New(reservation.ExpiresAt())
+	if err := expiresAt.CheckValid(); err != nil {
+		return nil, status.Error(codes.Internal, "inventory reservation expiry is invalid")
+	}
 	return &inventoryv1.GetReservationByOrderIDResponse{
 		ReservationId: reservation.ID(),
 		OrderId:       reservation.OrderID(),
 		Items:         responseItems,
 		Status:        protoStatus,
-		ExpiresAt:     timestamppb.New(reservation.ExpiresAt()),
+		ExpiresAt:     expiresAt,
 	}, nil
 }
 
